@@ -1,5 +1,5 @@
 from django.db import models
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, BaseUserManager
 from datetime import date
 import uuid
 
@@ -11,7 +11,7 @@ class ActivityLevel(models.Model):
 
     def __str__(self):
         return self.level_name
- 
+
 class User(AbstractUser):
     """Custom User Model"""
     GENDER_CHOICES = [
@@ -26,6 +26,17 @@ class User(AbstractUser):
         editable=False, 
         unique=True
     )
+
+    email = models.EmailField(unique=True)
+    full_name = models.CharField(max_length=150, blank=True, null=True)
+
+    username = None 
+    first_name = None
+    last_name = None
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES, default='M')
     birth_date = models.DateField(null=True, blank=True)
     height = models.FloatField(default=0, help_text="Height in cm")
@@ -68,7 +79,32 @@ class User(AbstractUser):
             bmr = (10 * current_weight) + (6.25 * self.height) - (5 * age) - 161
             
         return bmr * self.activity_level.ratio
- 
+
+class UserManager(BaseUserManager):
+    """Custom manager cho việc sử dụng email thay cho username"""
+
+    def create_user(self, email, password=None, **extra_fields):
+        """Tạo user thông thường."""
+        if not email:
+            raise ValueError("The Email field must be set")
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        """Tạo superuser."""
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Superuser must have is_staff=True.")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
+
+        return self.create_user(email, password, **extra_fields)
+
 class WeightHistory(models.Model):
     """Lịch sử cân nặng"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='weight_histories')
