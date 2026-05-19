@@ -3,6 +3,33 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from datetime import date
 import uuid
 
+class UserManager(BaseUserManager):
+    """Custom manager cho việc sử dụng email thay cho username"""
+    use_in_migrations = True
+
+    def create_user(self, email, password=None, **extra_fields):
+        """Tạo user thông thường."""
+        if not email:
+            raise ValueError("The Email field must be set")
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        """Tạo superuser."""
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        extra_fields.setdefault("is_active", True)
+
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Superuser must have is_staff=True.")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
+
+        return self.create_user(email, password, **extra_fields)
+
 class ActivityLevel(models.Model):
     """Mức độ vận động"""
     level_name = models.CharField(max_length=50)
@@ -19,6 +46,11 @@ class User(AbstractUser):
         ('F', 'Female'),
         ('O', 'Other'),
     ]
+    GOAL_CHOICES = [
+        ('maintain', 'Maintain weight'),
+        ('lose_weight', 'Lose weight'),
+        ('gain_weight', 'Gain weight'),
+    ]
     
     id = models.CharField(
         primary_key=True, 
@@ -28,6 +60,7 @@ class User(AbstractUser):
     )
 
     email = models.EmailField(unique=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
     full_name = models.CharField(max_length=150, blank=True, null=True)
 
     username = None 
@@ -36,10 +69,13 @@ class User(AbstractUser):
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
+    objects = UserManager()
 
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES, default='M')
     birth_date = models.DateField(null=True, blank=True)
     height = models.FloatField(default=0, help_text="Height in cm")
+    goal = models.CharField(max_length=20, choices=GOAL_CHOICES, default='maintain')
+    tdee = models.FloatField(default=0, help_text="Total Daily Energy Expenditure")
     # Liên kết với ActivityLevel
     activity_level = models.ForeignKey(ActivityLevel, on_delete=models.SET_NULL, null=True, related_name='users')
 
@@ -59,7 +95,20 @@ class User(AbstractUser):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.id} - {self.username}"
+        return f"{self.id} - {self.email}"
+
+    @property
+    def current_weight(self):
+        latest = self.weight_histories.order_by('-measured_at').first()
+        return latest.weight if latest else 0
+
+    @property
+    def bmi(self):
+        weight = self.current_weight
+        if not self.height or not weight:
+            return 0
+        height_m = self.height / 100
+        return round(weight / (height_m * height_m), 2)
 
     def calculateTDEE(self, current_weight):
         """
@@ -80,30 +129,12 @@ class User(AbstractUser):
             
         return bmr * self.activity_level.ratio
 
-class UserManager(BaseUserManager):
-    """Custom manager cho việc sử dụng email thay cho username"""
-
-    def create_user(self, email, password=None, **extra_fields):
-        """Tạo user thông thường."""
-        if not email:
-            raise ValueError("The Email field must be set")
-        email = self.normalize_email(email)
-        user = self.model(email=email, **extra_fields)
-        user.set_password(password)
-        user.save(using=self._db)
-        return user
-
-    def create_superuser(self, email, password=None, **extra_fields):
-        """Tạo superuser."""
-        extra_fields.setdefault("is_staff", True)
-        extra_fields.setdefault("is_superuser", True)
-
-        if extra_fields.get("is_staff") is not True:
-            raise ValueError("Superuser must have is_staff=True.")
-        if extra_fields.get("is_superuser") is not True:
-            raise ValueError("Superuser must have is_superuser=True.")
-
-        return self.create_user(email, password, **extra_fields)
+    def refresh_tdee(self, current_weight=None, commit=True):
+        current_weight = current_weight if current_weight is not None else self.current_weight
+        self.tdee = round(self.calculateTDEE(current_weight), 2)
+        if commit:
+            self.save(update_fields=['tdee'])
+        return self.tdee
 
 class WeightHistory(models.Model):
     """Lịch sử cân nặng"""
@@ -113,7 +144,22 @@ class WeightHistory(models.Model):
  
 class AccountOTP(models.Model):
     """Quản lý OTP xác thực"""
-    contact_info = models.CharField(max_length=255) # Email hoặc SĐT
+    PURPOSE_CHOICES = [
+        ('account_verify', 'Account verification'),
+        ('password_reset', 'Password reset'),
+    ]
+
+    contact_info = models.CharField(max_length=255) # Email 
     otp_code = models.CharField(max_length=6)
+    purpose = models.CharField(max_length=30, choices=PURPOSE_CHOICES, default='account_verify')
     expired_at = models.DateTimeField()
     is_verified = models.BooleanField(default=False)
+
+class QuotaConfig(models.Model):
+    """Cấu hình định mức sử dụng."""
+    key = models.CharField(max_length=50, unique=True, default='guest_scan_limit')
+    guest_scan_limit = models.PositiveIntegerField(default=2)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.key}: {self.guest_scan_limit}"

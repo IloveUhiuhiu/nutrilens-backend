@@ -24,10 +24,18 @@ class DailyLog(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Log {self.date} - {self.user.username}"
+        return f"Log {self.date} - {self.user.email}"
 
 class MealEntry(models.Model):
     """Một bữa ăn cụ thể """
+    SOURCE_CHOICES = [
+        ('image', 'Image'),
+        ('barcode', 'Barcode'),
+        ('text', 'Text'),
+        ('voice', 'Voice'),
+        ('manual', 'Manual'),
+    ]
+
     id = models.CharField(
         primary_key=True, 
         max_length=20, 
@@ -35,10 +43,17 @@ class MealEntry(models.Model):
         unique=True)
     log = models.ForeignKey(DailyLog, on_delete=models.CASCADE, related_name='meals')
     food = models.ForeignKey('nutrients.Food', on_delete=models.SET_NULL, null=True, blank=True)
+    packaged_food = models.ForeignKey('nutrients.PackagedFood', on_delete=models.SET_NULL, null=True, blank=True)
     
     meal_time = models.DateTimeField(auto_now_add=True)
-    image_path = models.ImageField(upload_to='meal_images/', verbose_name="Ảnh gốc RGB")
-    source_type = models.CharField(max_length=50, default="camera")
+    image_path = models.ImageField(upload_to='meal_images/', verbose_name="Ảnh gốc RGB", null=True, blank=True)
+    source_type = models.CharField(max_length=50, choices=SOURCE_CHOICES, default="image")
+    barcode = models.CharField(max_length=64, blank=True, null=True)
+    search_query = models.CharField(max_length=255, blank=True, null=True)
+    inference_job_id = models.CharField(max_length=20, blank=True, null=True)
+    is_confirmed = models.BooleanField(default=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
     
     total_calories = models.FloatField(default=0)
     total_protein = models.FloatField(default=0)
@@ -65,10 +80,14 @@ class MealComponent(models.Model):
     physical_data = models.ForeignKey('nutrients.IngredientPhysicalData', on_delete=models.PROTECT)
     
     component_name = models.CharField(max_length=255, verbose_name="Tên thành phần")
-    mask_path = models.ImageField(upload_to='masks/', verbose_name="Ảnh Mask")
+    mask_path = models.ImageField(upload_to='masks/', verbose_name="Ảnh Mask", null=True, blank=True)
     
     volume = models.FloatField(verbose_name="Thể tích (cm3)") 
     calculated_weight = models.FloatField(verbose_name="Khối lượng tính toán (g)", editable=False)
+    calories = models.FloatField(default=0)
+    protein = models.FloatField(default=0)
+    carbs = models.FloatField(default=0)
+    fat = models.FloatField(default=0)
 
     def save(self, *args, **kwargs):
         if not self.id:
@@ -77,6 +96,10 @@ class MealComponent(models.Model):
         # Logic tính toán khối lượng: m = V * density
         if self.volume and self.physical_data:
             self.calculated_weight = self.volume * self.physical_data.density
+            self.calories = self.calculated_weight * self.physical_data.cal_per_100g / 100
+            self.protein = self.calculated_weight * self.physical_data.protein_per_100g / 100
+            self.carbs = self.calculated_weight * self.physical_data.carb_per_100g / 100
+            self.fat = self.calculated_weight * self.physical_data.fat_per_100g / 100
             
         super().save(*args, **kwargs)
 

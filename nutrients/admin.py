@@ -1,9 +1,9 @@
 from django.contrib import admin
-from .models import IngredientPhysicalData, Food, HealthAdviceRule
+from .models import IngredientPhysicalData, Food, HealthAdviceRule, PackagedFood
 
 @admin.register(IngredientPhysicalData)
 class IngredientAdmin(admin.ModelAdmin):
-    list_display = ('id', 'vi_name', 'density', 'cal_per_100g', 'protein_per_100g')
+    list_display = ('id', 'vi_name', 'density', 'cal_per_100g', 'fat_per_100g', 'carb_per_100g', 'protein_per_100g')
     search_fields = ('vi_name', 'en_name', 'fdc_id_ref')
     list_filter = ('density',)
 
@@ -15,3 +15,9 @@ class FoodAdmin(admin.ModelAdmin):
 @admin.register(HealthAdviceRule)
 class RuleAdmin(admin.ModelAdmin):
     list_display = ('alert_level', 'min_percent', 'max_percent')
+
+@admin.register(PackagedFood)
+class PackagedFoodAdmin(admin.ModelAdmin):
+    list_display = ('barcode', 'name', 'brand', 'cal_per_serving', 'is_active')
+    search_fields = ('barcode', 'name', 'brand')
+    list_filter = ('is_active', 'brand')

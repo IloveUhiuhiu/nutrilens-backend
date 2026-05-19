@@ -52,6 +52,8 @@ INSTALLED_APPS = [
     'accounts.apps.AccountsConfig', # Quản lý định danh, thể trạng và OTP
     'nutrients.apps.NutrientsConfig', # Quản lý dữ liệu thực phẩm, khối lượng riêng và quy tắc lời khuyên
     'analysis.apps.AnalysisConfig', # Quản lý nhật ký người dùng và kết quả phân tích từ AI
+    'inference.apps.InferenceConfig', # Điều phối pipeline AI ảnh 2D
+    'reports.apps.ReportsConfig', # Thống kê dinh dưỡng và dashboard admin
 ]
 
 REST_FRAMEWORK = {
@@ -62,6 +64,7 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'EXCEPTION_HANDLER': 'accounts.exceptions.api_exception_handler',
 }
 
 from datetime import timedelta
@@ -147,6 +150,13 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
+]
+
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.BCryptSHA256PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
+    'django.contrib.auth.hashers.Argon2PasswordHasher',
 ]
 
 # Internationalization
