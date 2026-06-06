@@ -1,20 +1,29 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, ActivityLevel, WeightHistory, AccountOTP
+from .models import User, ActivityLevel, WeightHistory, AccountOTP, QuotaConfig
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
-    list_display = ('id', 'username', 'email', 'gender', 'is_staff')
-    search_fields = ('id', 'username', 'email')
-    
-    # Chia nhóm các trường thông tin trong trang chi tiết
-    fieldsets = UserAdmin.fieldsets + (
+    list_display = ('id', 'email', 'phone_number', 'gender', 'is_staff', 'is_active')
+    search_fields = ('id', 'email', 'phone_number')
+    ordering = ('-date_joined',)
+    fieldsets = (
+        (None, {'fields': ('email', 'password')}),
+        ('Thông tin cá nhân', {'fields': ('full_name', 'phone_number')}),
         ('Thông tin thể trạng (NutriLens)', {
-            'fields': ('gender', 'birth_date', 'height', 'activity_level')
+            'fields': ('gender', 'birth_date', 'height', 'tdee', 'activity_level')
+        }),
+        ('Quyền hạn', {
+            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')
+        }),
+        ('Mốc thời gian', {'fields': ('last_login', 'date_joined')}),
+    )
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': ('email', 'password1', 'password2', 'is_staff', 'is_superuser'),
         }),
     )
-    # Sắp xếp theo ID mới nhất
-    ordering = ('-date_joined',)
 
 @admin.register(ActivityLevel)
 class ActivityLevelAdmin(admin.ModelAdmin):
@@ -27,4 +36,8 @@ class WeightHistoryAdmin(admin.ModelAdmin):
 
 @admin.register(AccountOTP)
 class AccountOTPAdmin(admin.ModelAdmin):
-    list_display = ('contact_info', 'otp_code', 'is_verified', 'expired_at')
+    list_display = ('contact_info', 'otp_code', 'purpose', 'is_verified', 'expired_at')
+
+@admin.register(QuotaConfig)
+class QuotaConfigAdmin(admin.ModelAdmin):
+    list_display = ('key', 'guest_scan_limit', 'updated_at')
