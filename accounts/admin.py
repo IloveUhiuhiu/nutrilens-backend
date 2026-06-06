@@ -4,14 +4,14 @@ from .models import User, ActivityLevel, WeightHistory, AccountOTP, QuotaConfig
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
-    list_display = ('id', 'email', 'phone_number', 'gender', 'goal', 'is_staff', 'is_active')
+    list_display = ('id', 'email', 'phone_number', 'gender', 'is_staff', 'is_active')
     search_fields = ('id', 'email', 'phone_number')
     ordering = ('-date_joined',)
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         ('Thông tin cá nhân', {'fields': ('full_name', 'phone_number')}),
         ('Thông tin thể trạng (NutriLens)', {
-            'fields': ('gender', 'birth_date', 'height', 'goal', 'tdee', 'activity_level')
+            'fields': ('gender', 'birth_date', 'height', 'tdee', 'activity_level')
         }),
         ('Quyền hạn', {
             'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')

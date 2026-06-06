@@ -1,11 +1,5 @@
-from datetime import timedelta
-from functools import wraps
-import logging
-import random
-
-from django.contrib.auth.models import Group
 from django.db.models import Q
-from django.utils import timezone
+from django.conf import settings
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -15,15 +9,23 @@ from drf_spectacular.utils import (
 )
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
-from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import AccountOTP, QuotaConfig, User
+from core.api import (
+    API_EMPTY_RESPONSE,
+    DEFAULT_ERROR_RESPONSES,
+    api_response,
+    handle_api_exceptions,
+    not_found_response,
+    paginate_queryset,
+    validation_error_response,
+)
+from .models import ActivityLevel, QuotaConfig, User
 from .serializers import (
     AccountRoleSerializer,
     AccountStatusSerializer,
+    ActivityLevelSerializer,
     AdminAccountDetailSerializer,
     AdminAccountListSerializer,
     AdminPasswordResetSerializer,
@@ -38,31 +40,7 @@ from .serializers import (
     RegisterSerializer,
     ResetPasswordSerializer,
 )
-from .tasks import send_otp_email_task
-
-logger = logging.getLogger(__name__)
-
-
-API_ERROR_RESPONSE = inline_serializer(
-    name="ApiErrorResponse",
-    fields={
-        "status_code": serializers.IntegerField(),
-        "message": serializers.CharField(),
-        "data": serializers.JSONField(allow_null=True),
-        "errors": serializers.JSONField(allow_null=True),
-    },
-)
-
-
-API_EMPTY_RESPONSE = inline_serializer(
-    name="ApiEmptyResponse",
-    fields={
-        "status_code": serializers.IntegerField(),
-        "message": serializers.CharField(),
-        "data": serializers.JSONField(allow_null=True),
-        "errors": serializers.JSONField(allow_null=True),
-    },
-)
+from .services import AccountServiceError, issue_otp, reset_password_with_otp, update_account_role, update_account_status, verify_account_otp
 
 
 REGISTER_RESPONSE = inline_serializer(
@@ -150,72 +128,26 @@ QUOTA_RESPONSE = inline_serializer(
     },
 )
 
-
-DEFAULT_ERROR_RESPONSES = {
-    400: API_ERROR_RESPONSE,
-    401: API_ERROR_RESPONSE,
-    403: API_ERROR_RESPONSE,
-    404: API_ERROR_RESPONSE,
-    500: API_ERROR_RESPONSE,
-}
-
-
-def api_response(message, status_code=status.HTTP_200_OK, data=None, errors=None):
-    body = {
-        "status_code": status_code,
-        "message": message,
-        "data": data,
-        "errors": errors,
-    }
-    return Response(body, status=status_code)
+ACTIVITY_LEVEL_LIST_RESPONSE = inline_serializer(
+    name="ActivityLevelListResponse",
+    fields={
+        "status_code": serializers.IntegerField(),
+        "message": serializers.CharField(),
+        "data": ActivityLevelSerializer(many=True, read_only=True),
+        "errors": serializers.JSONField(allow_null=True),
+    },
+)
 
 
-def validation_error_response(serializer):
-    return api_response(
-        message="Validation failed.",
-        status_code=status.HTTP_400_BAD_REQUEST,
-        errors=serializer.errors,
-    )
-
-
-def handle_api_exceptions(view_func):
-    @wraps(view_func)
-    def wrapper(request, *args, **kwargs):
-        try:
-            return view_func(request, *args, **kwargs)
-        except Exception as exc:
-            logger.exception("Unhandled accounts API error in %s", view_func.__name__)
-            return api_response(
-                message="Internal server error.",
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                errors={"detail": [str(exc)]},
-            )
-
-    return wrapper
-
-
-def generate_otp():
-    """Generate a 6-digit OTP."""
-    return f"{random.randint(100000, 999999)}"
-
-
-def issue_otp(contact_info, purpose):
-    AccountOTP.objects.filter(
-        contact_info=contact_info,
-        purpose=purpose,
-        is_verified=False,
-    ).update(expired_at=timezone.now())
-
-    otp = generate_otp()
-    AccountOTP.objects.create(
-        contact_info=contact_info,
-        otp_code=otp,
-        purpose=purpose,
-        expired_at=timezone.now() + timedelta(minutes=5),
-        is_verified=False,
-    )
-    logger.info("OTP for %s (%s): %s", contact_info, purpose, otp)
-    send_otp_email_task.delay(contact_info, otp)
+ACTIVITY_LEVEL_RESPONSE = inline_serializer(
+    name="ActivityLevelResponse",
+    fields={
+        "status_code": serializers.IntegerField(),
+        "message": serializers.CharField(),
+        "data": ActivityLevelSerializer(read_only=True),
+        "errors": serializers.JSONField(allow_null=True),
+    },
+)
 
 
 @extend_schema(
@@ -238,6 +170,7 @@ def issue_otp(contact_info, purpose):
 @permission_classes([AllowAny])
 @handle_api_exceptions
 def register(request):
+    """Chức năng: API đăng ký tài khoản. Đầu vào: thông tin user và password. Đầu ra: id, email hoặc lỗi."""
     email = request.data.get("email")
     if email and User.objects.filter(email=email).exists():
         return api_response(
@@ -254,6 +187,22 @@ def register(request):
         message="Account registered successfully.",
         status_code=status.HTTP_201_CREATED,
         data={"id": user.id, "email": user.email},
+    )
+
+
+@extend_schema(
+    summary="Danh sách mức độ vận động",
+    responses={200: ACTIVITY_LEVEL_LIST_RESPONSE, **DEFAULT_ERROR_RESPONSES},
+)
+@api_view(["GET"])
+@permission_classes([AllowAny])
+@handle_api_exceptions
+def activity_level_list(request):
+    """Chức năng: API danh sách mức vận động. Đầu vào: không có. Đầu ra: danh sách ActivityLevel."""
+    queryset = ActivityLevel.objects.all().order_by("id")
+    return api_response(
+        message="Activity levels retrieved successfully.",
+        data=ActivityLevelSerializer(queryset, many=True).data,
     )
 
 
@@ -277,6 +226,7 @@ def register(request):
 @permission_classes([AllowAny])
 @handle_api_exceptions
 def login(request):
+    """Chức năng: API đăng nhập. Đầu vào: email và password. Đầu ra: access/refresh token hoặc lỗi."""
     serializer = LoginSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
@@ -301,6 +251,7 @@ def login(request):
 @permission_classes([AllowAny])
 @handle_api_exceptions
 def otp_request(request):
+    """Chức năng: API yêu cầu OTP xác thực. Đầu vào: email. Đầu ra: thông báo gửi OTP hoặc lỗi."""
     serializer = OTPRequestSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
@@ -337,33 +288,20 @@ def otp_request(request):
 @permission_classes([AllowAny])
 @handle_api_exceptions
 def otp_verify(request):
+    """Chức năng: API xác thực OTP tài khoản. Đầu vào: email và otp_code. Đầu ra: kích hoạt tài khoản hoặc lỗi."""
     serializer = OTPVerifySerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
     contact_info = serializer.validated_data["contact_info"]
     otp_code = serializer.validated_data["otp_code"]
-
-    otp_obj = AccountOTP.objects.filter(
-        contact_info=contact_info,
-        otp_code=otp_code,
-        purpose="account_verify",
-        is_verified=False,
-        expired_at__gt=timezone.now(),
-    ).first()
-    if not otp_obj:
+    try:
+        verify_account_otp(contact_info, otp_code)
+    except AccountServiceError as exc:
         return api_response(
-            message="Invalid or expired OTP.",
+            message=exc.message,
             status_code=status.HTTP_400_BAD_REQUEST,
-            errors={"otp_code": ["Invalid or expired OTP."]},
+            errors={exc.field: [exc.message]},
         )
-
-    otp_obj.is_verified = True
-    otp_obj.save(update_fields=["is_verified"])
-
-    user = User.objects.filter(email=contact_info).first()
-    if user:
-        user.is_active = True
-        user.save(update_fields=["is_active"])
 
     return api_response(message="OTP verified and account activated.")
 
@@ -377,6 +315,7 @@ def otp_verify(request):
 @permission_classes([AllowAny])
 @handle_api_exceptions
 def password_forgot(request):
+    """Chức năng: API quên mật khẩu. Đầu vào: email. Đầu ra: gửi OTP reset hoặc lỗi."""
     serializer = ForgotPasswordSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
@@ -402,38 +341,23 @@ def password_forgot(request):
 @permission_classes([AllowAny])
 @handle_api_exceptions
 def password_reset(request):
+    """Chức năng: API đặt mật khẩu sau OTP. Đầu vào: email, otp_code, new_password. Đầu ra: xác nhận reset hoặc lỗi."""
     serializer = ResetPasswordSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
-    email = serializer.validated_data["email"]
-    otp_code = serializer.validated_data["otp_code"]
-
-    otp_obj = AccountOTP.objects.filter(
-        contact_info=email,
-        otp_code=otp_code,
-        purpose="password_reset",
-        is_verified=False,
-        expired_at__gt=timezone.now(),
-    ).first()
-    if not otp_obj:
-        return api_response(
-            message="Invalid or expired OTP.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            errors={"otp_code": ["Invalid or expired OTP."]},
+    try:
+        reset_password_with_otp(
+            serializer.validated_data["email"],
+            serializer.validated_data["otp_code"],
+            serializer.validated_data["new_password"],
         )
-
-    user = User.objects.filter(email=email).first()
-    if not user:
+    except AccountServiceError as exc:
+        status_code = status.HTTP_404_NOT_FOUND if exc.field == "email" else status.HTTP_400_BAD_REQUEST
         return api_response(
-            message="User with this email not found.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            errors={"email": ["User with this email not found."]},
+            message=exc.message,
+            status_code=status_code,
+            errors={exc.field: [exc.message]},
         )
-
-    user.set_password(serializer.validated_data["new_password"])
-    user.save(update_fields=["password"])
-    otp_obj.is_verified = True
-    otp_obj.save(update_fields=["is_verified"])
     return api_response(message="Password reset successfully.")
 
 
@@ -452,6 +376,7 @@ def password_reset(request):
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def profile(request):
+    """Chức năng: API xem/cập nhật profile. Đầu vào: GET hoặc PATCH profile. Đầu ra: thông tin profile."""
     if request.method == "GET":
         return api_response(
             message="Profile retrieved successfully.",
@@ -477,6 +402,7 @@ def profile(request):
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def password_change(request):
+    """Chức năng: API đổi mật khẩu đã đăng nhập. Đầu vào: old_password, new_password. Đầu ra: xác nhận hoặc lỗi."""
     serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
     if not serializer.is_valid():
         return validation_error_response(serializer)
@@ -505,6 +431,7 @@ def password_change(request):
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def logout(request):
+    """Chức năng: API đăng xuất. Đầu vào: refresh token. Đầu ra: token bị blacklist hoặc lỗi."""
     try:
         refresh = request.data.get("refresh")
         if not refresh:
@@ -537,6 +464,7 @@ def logout(request):
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_account_list(request):
+    """Chức năng: API admin danh sách tài khoản. Đầu vào: role/search/page. Đầu ra: danh sách user phân trang."""
     queryset = User.objects.all().order_by("-date_joined")
     role = request.query_params.get("role")
     search = request.query_params.get("search")
@@ -551,14 +479,9 @@ def admin_account_list(request):
     if search:
         queryset = queryset.filter(Q(email__icontains=search) | Q(phone_number__icontains=search))
 
-    paginator = PageNumberPagination()
-    paginator.page_size = 20
-    page = paginator.paginate_queryset(queryset, request)
-    serializer = AdminAccountListSerializer(page, many=True)
-    paginated = paginator.get_paginated_response(serializer.data)
     return api_response(
         message="Accounts retrieved successfully.",
-        data=paginated.data,
+        data=paginate_queryset(request, queryset, AdminAccountListSerializer),
     )
 
 
@@ -570,13 +493,10 @@ def admin_account_list(request):
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_account_detail(request, id):
+    """Chức năng: API admin chi tiết tài khoản. Đầu vào: user id. Đầu ra: profile chi tiết hoặc lỗi."""
     user = User.objects.filter(id=id).first()
     if not user:
-        return api_response(
-            message="Account not found.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            errors={"id": ["Account not found."]},
-        )
+        return not_found_response("Account not found.")
     return api_response(
         message="Account retrieved successfully.",
         data=AdminAccountDetailSerializer(user).data,
@@ -592,6 +512,7 @@ def admin_account_detail(request, id):
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_account_status(request, id):
+    """Chức năng: API admin khóa/mở tài khoản. Đầu vào: user id, is_active. Đầu ra: user đã cập nhật hoặc lỗi."""
     user = User.objects.filter(id=id).first()
     if not user:
         return api_response(
@@ -605,17 +526,14 @@ def admin_account_status(request, id):
         return validation_error_response(serializer)
     new_status = serializer.validated_data["is_active"]
 
-    if user.is_superuser and not new_status:
-        active_admin_count = User.objects.filter(is_superuser=True, is_active=True).count()
-        if active_admin_count <= 1:
-            return api_response(
-                message="Cannot lock the only active admin account.",
-                status_code=status.HTTP_400_BAD_REQUEST,
-                errors={"is_active": ["Cannot lock the only active admin account."]},
-            )
-
-    user.is_active = new_status
-    user.save(update_fields=["is_active"])
+    try:
+        update_account_status(user, new_status)
+    except AccountServiceError as exc:
+        return api_response(
+            message=exc.message,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            errors={exc.field: [exc.message]},
+        )
     return api_response(
         message="Account status updated successfully.",
         data=AdminAccountDetailSerializer(user).data,
@@ -631,18 +549,15 @@ def admin_account_status(request, id):
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_account_reset_password(request, id):
+    """Chức năng: API admin reset mật khẩu. Đầu vào: user id, new_password tùy chọn. Đầu ra: xác nhận hoặc lỗi."""
     user = User.objects.filter(id=id).first()
     if not user:
-        return api_response(
-            message="Account not found.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            errors={"id": ["Account not found."]},
-        )
+        return not_found_response("Account not found.")
 
     serializer = AdminPasswordResetSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
-    new_password = serializer.validated_data.get("new_password") or "NutriLens@123"
+    new_password = serializer.validated_data.get("new_password") or settings.ADMIN_DEFAULT_RESET_PASSWORD
     user.set_password(new_password)
     user.save(update_fields=["password"])
     return api_response(message="Password reset successfully.")
@@ -657,6 +572,7 @@ def admin_account_reset_password(request, id):
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_account_role(request, id):
+    """Chức năng: API admin đổi vai trò/nhóm quyền. Đầu vào: user id, role/group_ids. Đầu ra: user đã cập nhật."""
     user = User.objects.filter(id=id).first()
     if not user:
         return api_response(
@@ -669,27 +585,18 @@ def admin_account_role(request, id):
     if not serializer.is_valid():
         return validation_error_response(serializer)
 
-    role = serializer.validated_data.get("role")
-    if role == "admin":
-        user.is_staff = True
-        user.is_superuser = True
-    elif role == "staff":
-        user.is_staff = True
-        user.is_superuser = False
-    elif role == "user":
-        if user.is_superuser and User.objects.filter(is_superuser=True, is_active=True).count() <= 1:
-            return api_response(
-                message="Cannot remove admin role from the only active admin account.",
-                status_code=status.HTTP_400_BAD_REQUEST,
-                errors={"role": ["Cannot remove admin role from the only active admin account."]},
-            )
-        user.is_staff = False
-        user.is_superuser = False
-
-    user.save(update_fields=["is_staff", "is_superuser"])
-
-    if "group_ids" in serializer.validated_data:
-        user.groups.set(Group.objects.filter(id__in=serializer.validated_data["group_ids"]))
+    try:
+        update_account_role(
+            user,
+            role=serializer.validated_data.get("role"),
+            group_ids=serializer.validated_data.get("group_ids") if "group_ids" in serializer.validated_data else None,
+        )
+    except AccountServiceError as exc:
+        return api_response(
+            message=exc.message,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            errors={exc.field: [exc.message]},
+        )
 
     return api_response(
         message="Account role updated successfully.",
@@ -706,6 +613,7 @@ def admin_account_role(request, id):
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_quota_update(request):
+    """Chức năng: API admin cập nhật quota guest. Đầu vào: guest_scan_limit. Đầu ra: quota đã lưu."""
     quota, _ = QuotaConfig.objects.get_or_create(key="guest_scan_limit")
     serializer = QuotaConfigSerializer(quota, data=request.data)
     if not serializer.is_valid():
@@ -713,5 +621,71 @@ def admin_quota_update(request):
     serializer.save()
     return api_response(
         message="Quota updated successfully.",
+        data=serializer.data,
+    )
+
+
+@extend_schema(
+    summary="Admin danh sách và tạo mức vận động",
+    request=ActivityLevelSerializer,
+    responses={200: ACTIVITY_LEVEL_LIST_RESPONSE, 201: ACTIVITY_LEVEL_RESPONSE, **DEFAULT_ERROR_RESPONSES},
+)
+@api_view(["GET", "POST"])
+@permission_classes([IsAdminUser])
+@handle_api_exceptions
+def admin_activity_level_list_create(request):
+    """Chức năng: API admin list/create mức vận động. Đầu vào: payload nếu POST. Đầu ra: danh sách hoặc ActivityLevel mới."""
+    if request.method == "GET":
+        queryset = ActivityLevel.objects.all().order_by("id")
+        return api_response(
+            message="Activity levels retrieved successfully.",
+            data=ActivityLevelSerializer(queryset, many=True).data,
+        )
+
+    serializer = ActivityLevelSerializer(data=request.data)
+    if not serializer.is_valid():
+        return validation_error_response(serializer)
+    activity_level = serializer.save()
+    return api_response(
+        message="Activity level created successfully.",
+        status_code=status.HTTP_201_CREATED,
+        data=ActivityLevelSerializer(activity_level).data,
+    )
+
+
+@extend_schema(
+    summary="Admin chi tiết mức vận động",
+    request=ActivityLevelSerializer,
+    responses={200: ACTIVITY_LEVEL_RESPONSE, **DEFAULT_ERROR_RESPONSES},
+)
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAdminUser])
+@handle_api_exceptions
+def admin_activity_level_detail(request, id):
+    """Chức năng: API admin xem/sửa/xóa mức vận động. Đầu vào: id và payload tùy method. Đầu ra: ActivityLevel hoặc xác nhận xóa."""
+    activity_level = ActivityLevel.objects.filter(id=id).first()
+    if not activity_level:
+        return api_response(
+            message="Activity level not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            errors={"id": ["Activity level not found."]},
+        )
+
+    if request.method == "GET":
+        return api_response(
+            message="Activity level retrieved successfully.",
+            data=ActivityLevelSerializer(activity_level).data,
+        )
+
+    if request.method == "DELETE":
+        activity_level.delete()
+        return api_response(message="Activity level deleted successfully.")
+
+    serializer = ActivityLevelSerializer(activity_level, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return validation_error_response(serializer)
+    serializer.save()
+    return api_response(
+        message="Activity level updated successfully.",
         data=serializer.data,
     )

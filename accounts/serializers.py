@@ -13,6 +13,7 @@ class ActivityLevelSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
+    weight = serializers.FloatField(write_only=True, min_value=1)
 
     class Meta:
         model = User
@@ -24,11 +25,13 @@ class RegisterSerializer(serializers.ModelSerializer):
             "gender",
             "birth_date",
             "height",
-            "goal",
+            "weight",
             "activity_level",
         )
 
     def create(self, validated_data):
+        """Chức năng: tạo user đăng ký. Đầu vào: validated_data. Đầu ra: User chưa active."""
+        weight = validated_data.pop("weight")
         user = User.objects.create_user(
             email=validated_data["email"],
             password=validated_data["password"],
@@ -37,10 +40,11 @@ class RegisterSerializer(serializers.ModelSerializer):
             gender=validated_data.get("gender", "M"),
             birth_date=validated_data.get("birth_date"),
             height=validated_data.get("height", 0),
-            goal=validated_data.get("goal", "maintain"),
             activity_level=validated_data.get("activity_level"),
             is_active=False,
         )
+        WeightHistory.objects.create(user=user, weight=weight)
+        user.refresh_tdee(current_weight=weight)
         return user
 
 
@@ -49,6 +53,7 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
+        """Chức năng: xác thực đăng nhập. Đầu vào: email/password. Đầu ra: refresh/access token."""
         user = authenticate(username=attrs["email"], password=attrs["password"])
         if not user:
             raise serializers.ValidationError("Invalid credentials.")
@@ -74,14 +79,15 @@ class ForgotPasswordSerializer(serializers.Serializer):
 class ResetPasswordSerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp_code = serializers.CharField(max_length=6)
-    new_password = serializers.CharField(write_only=True, min_length=8)
+    new_password = serializers.CharField(write_only=True, min_length=6)
 
 
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(write_only=True)
-    new_password = serializers.CharField(write_only=True, min_length=8)
+    new_password = serializers.CharField(write_only=True, min_length=6)
 
     def validate_old_password(self, value):
+        """Chức năng: kiểm tra mật khẩu cũ. Đầu vào: old_password. Đầu ra: value hợp lệ hoặc lỗi."""
         user = self.context["request"].user
         if not user.check_password(value):
             raise serializers.ValidationError("Old password is incorrect.")
@@ -111,7 +117,6 @@ class ProfileSerializer(serializers.ModelSerializer):
             "height",
             "current_weight",
             "bmi",
-            "goal",
             "activity_level",
             "tdee",
         )
@@ -122,14 +127,14 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("height", "weight", "goal", "activity_level")
+        fields = ("height", "weight", "activity_level", "birth_date")
         extra_kwargs = {
             "height": {"required": False, "min_value": 1},
-            "goal": {"required": False},
             "activity_level": {"required": False},
         }
 
     def update(self, instance, validated_data):
+        """Chức năng: cập nhật profile và TDEE. Đầu vào: user, validated_data. Đầu ra: user đã cập nhật."""
         weight = validated_data.pop("weight", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -149,6 +154,7 @@ class AdminAccountListSerializer(serializers.ModelSerializer):
         fields = ("id", "full_name", "email", "phone_number", "role", "is_active", "date_joined")
 
     def get_role(self, obj):
+        """Chức năng: lấy vai trò user. Đầu vào: User. Đầu ra: admin/staff/user."""
         if obj.is_superuser:
             return "admin"
         if obj.is_staff:
@@ -174,6 +180,7 @@ class AdminAccountDetailSerializer(ProfileSerializer):
         )
 
     def get_role(self, obj):
+        """Chức năng: lấy vai trò user. Đầu vào: User. Đầu ra: admin/staff/user."""
         if obj.is_superuser:
             return "admin"
         if obj.is_staff:
@@ -181,6 +188,7 @@ class AdminAccountDetailSerializer(ProfileSerializer):
         return "user"
 
     def get_daily_logs(self, obj):
+        """Chức năng: lấy 30 daily log gần nhất. Đầu vào: User. Đầu ra: danh sách log tóm tắt."""
         return [
             {
                 "id": log.id,
@@ -200,7 +208,7 @@ class AccountStatusSerializer(serializers.Serializer):
 
 
 class AdminPasswordResetSerializer(serializers.Serializer):
-    new_password = serializers.CharField(required=False, allow_blank=False, min_length=8)
+    new_password = serializers.CharField(required=False, allow_blank=False, min_length=6)
 
 
 class AccountRoleSerializer(serializers.Serializer):
@@ -212,6 +220,7 @@ class AccountRoleSerializer(serializers.Serializer):
     )
 
     def validate_group_ids(self, value):
+        """Chức năng: kiểm tra group ids. Đầu vào: list id. Đầu ra: list id hợp lệ hoặc lỗi."""
         existing = set(Group.objects.filter(id__in=value).values_list("id", flat=True))
         missing = set(value) - existing
         if missing:

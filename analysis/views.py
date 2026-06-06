@@ -1,4 +1,3 @@
-from django.db.models import Q
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import status
@@ -9,167 +8,177 @@ from core.api import (
     API_EMPTY_RESPONSE,
     DEFAULT_ERROR_RESPONSES,
     api_response,
+    external_service_error_response,
     handle_api_exceptions,
     not_found_response,
     paginate_queryset,
     validation_error_response,
 )
-from inference.models import InferenceJob
-from nutrients.models import Food, PackagedFood
-from nutrients.serializers import FoodSerializer
-from .models import DailyLog, MealComponent, MealEntry
+from nutrients.clients import ExternalLookupError
+from nutrients.services import get_or_lookup_barcode, search_usda_top_foods
+from nutrients.serializers import PackagedFoodSerializer
+from .models import DailyLog, MealEntry
 from .serializers import (
     DailyLogSerializer,
     ManualMealSerializer,
     MealBarcodeSerializer,
     MealEntrySerializer,
     MealFromInferenceSerializer,
+    MealFromUSDASerializer,
     MealSearchSerializer,
     MealUpdateSerializer,
-    get_or_create_daily_log,
     refresh_daily_log,
+)
+from .services import (
+    AnalysisServiceError,
+    create_manual_meal,
+    create_meal_from_barcode as create_barcode_meal,
+    create_meal_from_inference as create_inference_meal,
+    create_meal_from_usda as create_usda_meal,
 )
 
 
 def user_meal_queryset(user):
+    """Chức năng: lấy meal của user. Đầu vào: user. Đầu ra: queryset MealEntry đã tối ưu quan hệ."""
     return MealEntry.objects.filter(log__user=user).select_related("log", "food", "packaged_food").prefetch_related("components")
 
 
-def create_meal_from_totals(log, **kwargs):
-    meal = MealEntry.objects.create(log=log, confirmed_at=timezone.now(), **kwargs)
-    refresh_daily_log(log)
-    return meal
+@extend_schema(summary="Tra cứu barcode", parameters=[OpenApiParameter("barcode", OpenApiTypes.STR)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+@handle_api_exceptions
+def barcode_lookup(request, barcode):
+    """Chức năng: API tra barcode local trước, thiếu thì gọi OFF. Đầu vào: barcode. Đầu ra: PackagedFood hoặc lỗi."""
+    try:
+        packaged_food = get_or_lookup_barcode(barcode)
+    except ExternalLookupError as exc:
+        return external_service_error_response(exc, service_name="open_food_facts")
+    if not packaged_food:
+        return not_found_response("Packaged food not found.", field="barcode")
+    return api_response("Packaged food retrieved successfully.", data=PackagedFoodSerializer(packaged_food).data)
 
 
-@extend_schema(request=MealFromInferenceSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Tạo bữa ăn từ kết quả AI", request=MealFromInferenceSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def meal_from_inference(request):
+    """Chức năng: API tạo meal từ kết quả AI. Đầu vào: job_id, date, notes. Đầu ra: MealEntry hoặc lỗi."""
     serializer = MealFromInferenceSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
 
-    job = InferenceJob.objects.filter(id=serializer.validated_data["job_id"], user=request.user).first()
-    if not job:
-        return not_found_response("Inference job not found.", field="job_id")
-    if job.status != "succeeded" or not hasattr(job, "result"):
-        return api_response(
-            "Inference result is not ready.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            errors={"job_id": ["Inference result is not ready."]},
+    try:
+        meal = create_inference_meal(
+            request.user,
+            serializer.validated_data["job_id"],
+            date=serializer.validated_data.get("date"),
+            notes=serializer.validated_data.get("notes", ""),
         )
-
-    log = get_or_create_daily_log(request.user, serializer.validated_data.get("date"))
-    result = job.result
-    meal = create_meal_from_totals(
-        log,
-        source_type="image",
-        image_path=job.image,
-        inference_job_id=job.id,
-        notes=serializer.validated_data.get("notes", ""),
-        total_calories=result.total_calories,
-        total_protein=result.total_protein,
-        total_carbs=result.total_carbs,
-        total_fat=result.total_fat,
-        total_weight=result.total_weight,
-    )
+    except AnalysisServiceError as exc:
+        status_code = status.HTTP_404_NOT_FOUND if exc.field == "job_id" and "not found" in exc.message.lower() else status.HTTP_400_BAD_REQUEST
+        return api_response(
+            exc.message,
+            status_code=status_code,
+            errors={exc.field: [exc.message]},
+        )
     return api_response("Meal created from inference successfully.", status_code=status.HTTP_201_CREATED, data=MealEntrySerializer(meal).data)
 
 
-@extend_schema(request=MealBarcodeSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Tạo bữa ăn từ barcode", request=MealBarcodeSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def meal_from_barcode(request):
+    """Chức năng: API tạo meal từ barcode đã tra cứu/local. Đầu vào: barcode, servings, date. Đầu ra: MealEntry."""
     serializer = MealBarcodeSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
 
-    packaged_food = PackagedFood.objects.filter(barcode=serializer.validated_data["barcode"], is_active=True).first()
-    if not packaged_food:
-        return not_found_response("Packaged food not found.", field="barcode")
-
-    servings = serializer.validated_data["servings"]
-    log = get_or_create_daily_log(request.user, serializer.validated_data.get("date"))
-    meal = create_meal_from_totals(
-        log,
-        packaged_food=packaged_food,
-        source_type="barcode",
-        barcode=packaged_food.barcode,
-        total_calories=packaged_food.cal_per_serving * servings,
-        total_protein=packaged_food.protein_per_serving * servings,
-        total_carbs=packaged_food.carb_per_serving * servings,
-        total_fat=packaged_food.fat_per_serving * servings,
-        total_weight=packaged_food.serving_size * servings,
-    )
+    try:
+        meal = create_barcode_meal(
+            request.user,
+            serializer.validated_data["barcode"],
+            servings=serializer.validated_data["servings"],
+            date=serializer.validated_data.get("date"),
+        )
+    except ExternalLookupError as exc:
+        return external_service_error_response(exc, service_name="open_food_facts")
+    except AnalysisServiceError as exc:
+        return api_response(exc.message, status_code=status.HTTP_404_NOT_FOUND, errors={exc.field: [exc.message]})
     return api_response("Meal created from barcode successfully.", status_code=status.HTTP_201_CREATED, data=MealEntrySerializer(meal).data)
 
 
-@extend_schema(request=MealSearchSerializer, responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Tìm kiếm top 5 món ăn bằng USDA", request=MealSearchSerializer, responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def meal_search(request):
+    """Chức năng: API tìm top 5 món USDA. Đầu vào: query/source_type. Đầu ra: kết quả dùng đơn vị gram."""
     serializer = MealSearchSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
 
     query = serializer.validated_data["query"]
-    foods = Food.objects.filter(Q(vi_name__icontains=query) | Q(en_name__icontains=query) | Q(category__icontains=query)).order_by("vi_name")[:20]
+    try:
+        data = search_usda_top_foods(
+            query,
+            limit=serializer.validated_data["page_size"],
+        )
+    except ExternalLookupError as exc:
+        return external_service_error_response(exc, service_name="usda")
+
+    data["source_type"] = serializer.validated_data["source_type"]
     return api_response(
         "Meal search completed successfully.",
-        data={
-            "query": query,
-            "source_type": serializer.validated_data["source_type"],
-            "results": FoodSerializer(foods, many=True).data,
-        },
+        data=data,
     )
 
 
-@extend_schema(request=ManualMealSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Tạo bữa ăn từ USDA", request=MealFromUSDASerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@handle_api_exceptions
+def meal_from_usda(request):
+    """Chức năng: API tạo meal từ Food USDA. Đầu vào: fdc_id và grams. Đầu ra: MealEntry."""
+    serializer = MealFromUSDASerializer(data=request.data)
+    if not serializer.is_valid():
+        return validation_error_response(serializer)
+
+    try:
+        meal = create_usda_meal(
+            request.user,
+            serializer.validated_data["fdc_id"],
+            serializer.validated_data["grams"],
+            date=serializer.validated_data.get("date"),
+            source_type=serializer.validated_data["source_type"],
+            search_query=serializer.validated_data.get("search_query", ""),
+        )
+    except ExternalLookupError as exc:
+        return external_service_error_response(exc, service_name="usda")
+    return api_response("Meal created from USDA successfully.", status_code=status.HTTP_201_CREATED, data=MealEntrySerializer(meal).data)
+
+
+@extend_schema(summary="Tạo bữa ăn thủ công", request=ManualMealSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def meal_manual(request):
+    """Chức năng: API tạo meal thủ công. Đầu vào: food, components hoặc tổng dinh dưỡng. Đầu ra: MealEntry."""
     serializer = ManualMealSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
 
-    log = get_or_create_daily_log(request.user, serializer.validated_data.get("date"))
-    meal = MealEntry.objects.create(
-        log=log,
-        food=serializer.validated_data.get("food"),
-        source_type="manual",
-        notes=serializer.validated_data.get("notes", ""),
-        confirmed_at=timezone.now(),
-        total_calories=serializer.validated_data.get("total_calories", 0),
-        total_protein=serializer.validated_data.get("total_protein", 0),
-        total_carbs=serializer.validated_data.get("total_carbs", 0),
-        total_fat=serializer.validated_data.get("total_fat", 0),
-        total_weight=serializer.validated_data.get("total_weight", 0),
-    )
-
-    for component in serializer.validated_data.get("components", []):
-        MealComponent.objects.create(meal_entry=meal, **component)
-
-    if meal.components.exists():
-        meal.total_calories = sum(component.calories for component in meal.components.all())
-        meal.total_protein = sum(component.protein for component in meal.components.all())
-        meal.total_carbs = sum(component.carbs for component in meal.components.all())
-        meal.total_fat = sum(component.fat for component in meal.components.all())
-        meal.total_weight = sum(component.calculated_weight for component in meal.components.all())
-        meal.save(update_fields=["total_calories", "total_protein", "total_carbs", "total_fat", "total_weight"])
-
-    refresh_daily_log(log)
+    meal = create_manual_meal(request.user, serializer.validated_data)
     return api_response("Manual meal created successfully.", status_code=status.HTTP_201_CREATED, data=MealEntrySerializer(meal).data)
 
 
-@extend_schema(parameters=[OpenApiParameter("date", OpenApiTypes.DATE), OpenApiParameter("from", OpenApiTypes.DATE), OpenApiParameter("to", OpenApiTypes.DATE), OpenApiParameter("page", OpenApiTypes.INT)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Danh sách bữa ăn", parameters=[OpenApiParameter("date", OpenApiTypes.DATE), OpenApiParameter("from", OpenApiTypes.DATE), OpenApiParameter("to", OpenApiTypes.DATE), OpenApiParameter("page", OpenApiTypes.INT)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def meal_list(request):
+    """Chức năng: API danh sách meal của user. Đầu vào: date/from/to/page. Đầu ra: danh sách MealEntry phân trang."""
     queryset = user_meal_queryset(request.user).order_by("-meal_time")
     date = request.query_params.get("date")
     date_from = request.query_params.get("from")
@@ -183,11 +192,12 @@ def meal_list(request):
     return api_response("Meals retrieved successfully.", data=paginate_queryset(request, queryset, MealEntrySerializer))
 
 
-@extend_schema(request=MealUpdateSerializer, responses={200: OpenApiTypes.OBJECT, 204: API_EMPTY_RESPONSE, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Chi tiết bữa ăn", request=MealUpdateSerializer, responses={200: OpenApiTypes.OBJECT, 204: API_EMPTY_RESPONSE, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def meal_detail(request, id):
+    """Chức năng: API xem/sửa/xóa meal. Đầu vào: meal id và payload tùy method. Đầu ra: MealEntry hoặc xác nhận xóa."""
     meal = user_meal_queryset(request.user).filter(id=id).first()
     if not meal:
         return not_found_response("Meal not found.")
@@ -209,11 +219,12 @@ def meal_detail(request, id):
     return api_response("Meal updated successfully.", data=MealEntrySerializer(meal).data)
 
 
-@extend_schema(parameters=[OpenApiParameter("date", OpenApiTypes.DATE)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Nhật ký dinh dưỡng theo ngày", parameters=[OpenApiParameter("date", OpenApiTypes.DATE)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def daily_log(request):
+    """Chức năng: API nhật ký ngày. Đầu vào: date tùy chọn. Đầu ra: DailyLog của user hoặc null."""
     date = request.query_params.get("date") or timezone.localdate()
     log = DailyLog.objects.filter(user=request.user, date=date).first()
     if not log:
@@ -221,11 +232,12 @@ def daily_log(request):
     return api_response("Daily log retrieved successfully.", data=DailyLogSerializer(log).data)
 
 
-@extend_schema(parameters=[OpenApiParameter("from", OpenApiTypes.DATE, required=True), OpenApiParameter("to", OpenApiTypes.DATE, required=True)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Nhật ký dinh dưỡng theo khoảng ngày", parameters=[OpenApiParameter("from", OpenApiTypes.DATE, required=True), OpenApiParameter("to", OpenApiTypes.DATE, required=True)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @handle_api_exceptions
 def range_logs(request):
+    """Chức năng: API nhật ký theo khoảng ngày. Đầu vào: from và to. Đầu ra: danh sách DailyLog."""
     date_from = request.query_params.get("from")
     date_to = request.query_params.get("to")
     if not date_from or not date_to:
@@ -234,11 +246,12 @@ def range_logs(request):
     return api_response("Range logs retrieved successfully.", data=DailyLogSerializer(logs, many=True).data)
 
 
-@extend_schema(responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Admin danh sách bữa ăn", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_meal_list(request):
+    """Chức năng: API admin danh sách meal. Đầu vào: user_id/page tùy chọn. Đầu ra: danh sách MealEntry phân trang."""
     queryset = MealEntry.objects.all().select_related("log", "log__user", "food", "packaged_food").order_by("-meal_time")
     user_id = request.query_params.get("user_id")
     if user_id:
@@ -246,22 +259,24 @@ def admin_meal_list(request):
     return api_response("Meals retrieved successfully.", data=paginate_queryset(request, queryset, MealEntrySerializer))
 
 
-@extend_schema(responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Admin chi tiết bữa ăn", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_meal_detail(request, id):
+    """Chức năng: API admin chi tiết meal. Đầu vào: meal id. Đầu ra: MealEntry hoặc lỗi 404."""
     meal = MealEntry.objects.filter(id=id).first()
     if not meal:
         return not_found_response("Meal not found.")
     return api_response("Meal retrieved successfully.", data=MealEntrySerializer(meal).data)
 
 
-@extend_schema(responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Admin danh sách nhật ký", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_log_list(request):
+    """Chức năng: API admin danh sách log. Đầu vào: user_id/page tùy chọn. Đầu ra: danh sách DailyLog phân trang."""
     queryset = DailyLog.objects.all().select_related("user").order_by("-date")
     user_id = request.query_params.get("user_id")
     if user_id:
@@ -269,11 +284,12 @@ def admin_log_list(request):
     return api_response("Daily logs retrieved successfully.", data=paginate_queryset(request, queryset, DailyLogSerializer))
 
 
-@extend_schema(responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(summary="Admin chi tiết nhật ký", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_log_detail(request, id):
+    """Chức năng: API admin chi tiết log. Đầu vào: log id. Đầu ra: DailyLog hoặc lỗi 404."""
     log = DailyLog.objects.filter(id=id).first()
     if not log:
         return not_found_response("Daily log not found.")

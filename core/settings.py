@@ -14,9 +14,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
@@ -64,7 +64,7 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
-    'EXCEPTION_HANDLER': 'accounts.exceptions.api_exception_handler',
+    'EXCEPTION_HANDLER': 'core.exceptions.api_exception_handler',
 }
 
 from datetime import timedelta
@@ -164,7 +164,7 @@ PASSWORD_HASHERS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Ho_Chi_Minh'
 
 USE_I18N = True
 
@@ -187,9 +187,40 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
 
+# --- ACCOUNTS ---
+ADMIN_DEFAULT_RESET_PASSWORD = os.getenv("ADMIN_DEFAULT_RESET_PASSWORD", "NutriLens@123")
+
 # --- CELERY ---
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
+
+# --- EXTERNAL SERVICES ---
+EXTERNAL_API_TIMEOUT = float(os.getenv("EXTERNAL_API_TIMEOUT", "5"))
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
+
+AI_SERVER_URL = os.getenv("AI_SERVER_URL", "").rstrip("/")
+AI_SERVER_ANALYZE_PATH = os.getenv("AI_SERVER_ANALYZE_PATH", "/analyze")
+AI_SERVER_API_KEY = os.getenv("AI_SERVER_API_KEY", "")
+AI_SERVER_TIMEOUT = float(os.getenv("AI_SERVER_TIMEOUT", "30"))
+
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "")
+CLOUDINARY_UPLOAD_PRESET = os.getenv("CLOUDINARY_UPLOAD_PRESET", "")
+CLOUDINARY_FOLDER = os.getenv("CLOUDINARY_FOLDER", "nutrilens/inference")
+CLOUDINARY_UPLOAD_TIMEOUT = float(os.getenv("CLOUDINARY_UPLOAD_TIMEOUT", "30"))
+
+OPEN_FOOD_FACTS_BASE_URL = os.getenv(
+    "OPEN_FOOD_FACTS_BASE_URL",
+    "https://world.openfoodfacts.org",
+).rstrip("/")
+OPEN_FOOD_FACTS_USER_AGENT = os.getenv(
+    "OPEN_FOOD_FACTS_USER_AGENT",
+    "NutriLens/1.0 (contact: admin@nutrilens.local)",
+)
+
+USDA_BASE_URL = os.getenv("USDA_BASE_URL", "https://api.nal.usda.gov/fdc/v1").rstrip("/")
+USDA_API_KEY = os.getenv("USDA_API_KEY", "")

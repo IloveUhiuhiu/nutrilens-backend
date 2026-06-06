@@ -45,6 +45,9 @@ class MealEntrySerializer(serializers.ModelSerializer):
             "barcode",
             "search_query",
             "inference_job_id",
+            "serving_amount",
+            "serving_unit_id",
+            "serving_unit_label",
             "is_confirmed",
             "confirmed_at",
             "notes",
@@ -90,6 +93,15 @@ class MealBarcodeSerializer(serializers.Serializer):
 class MealSearchSerializer(serializers.Serializer):
     query = serializers.CharField(max_length=255)
     source_type = serializers.ChoiceField(choices=("text", "voice"), default="text")
+    page_size = serializers.IntegerField(required=False, min_value=1, max_value=5, default=5)
+
+
+class MealFromUSDASerializer(serializers.Serializer):
+    fdc_id = serializers.CharField(max_length=50)
+    date = serializers.DateField(required=False)
+    grams = serializers.FloatField(min_value=0.01)
+    source_type = serializers.ChoiceField(choices=("text", "voice"), default="text")
+    search_query = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 
 class ManualComponentInputSerializer(serializers.Serializer):
@@ -120,10 +132,12 @@ class MealUpdateSerializer(serializers.Serializer):
 
 
 def get_or_create_daily_log(user, date_value=None):
+    """Chức năng: lấy hoặc tạo nhật ký ngày. Đầu vào: user và ngày tùy chọn. Đầu ra: DailyLog."""
     return DailyLog.objects.get_or_create(user=user, date=date_value or timezone.localdate())[0]
 
 
 def refresh_daily_log(log):
+    """Chức năng: tính lại tổng dinh dưỡng ngày. Đầu vào: DailyLog. Đầu ra: DailyLog đã cập nhật."""
     totals = log.meals.all()
     log.total_calories = sum(meal.total_calories for meal in totals)
     log.total_protein = sum(meal.total_protein for meal in totals)

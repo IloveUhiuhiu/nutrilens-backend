@@ -2,6 +2,7 @@ from rest_framework.views import exception_handler
 
 
 def api_exception_handler(exc, context):
+    """Chức năng: chuẩn hóa exception DRF. Đầu vào: exception và context. Đầu ra: response envelope hoặc None."""
     response = exception_handler(exc, context)
     if response is None:
         return response

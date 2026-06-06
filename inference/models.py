@@ -13,7 +13,11 @@ class InferenceJob(models.Model):
 
     id = models.CharField(primary_key=True, max_length=20, editable=False, unique=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='inference_jobs')
-    image = models.ImageField(upload_to='inference/images/')
+    image = models.ImageField(upload_to='inference/images/', blank=True, null=True)
+    image_url = models.URLField(max_length=1000, blank=True)
+    depth_map = models.FileField(upload_to='inference/depth_maps/', blank=True)
+    camera_metadata = models.JSONField(default=dict, blank=True)
+    depth_metadata = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     model_version = models.CharField(max_length=100, blank=True)
     latency_ms = models.PositiveIntegerField(default=0)
@@ -23,11 +27,13 @@ class InferenceJob(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
+        """Chức năng: lưu inference job và sinh id. Đầu vào: args/kwargs save. Đầu ra: InferenceJob được lưu."""
         if not self.id:
             self.id = f"inf_{uuid.uuid4().hex[:8]}"
         super().save(*args, **kwargs)
 
     def __str__(self):
+        """Chức năng: biểu diễn inference job. Đầu vào: instance. Đầu ra: id và trạng thái."""
         return f"{self.id} - {self.status}"
 
 
@@ -43,11 +49,13 @@ class InferenceResult(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
+        """Chức năng: lưu inference result và sinh id. Đầu vào: args/kwargs save. Đầu ra: InferenceResult được lưu."""
         if not self.id:
             self.id = f"res_{uuid.uuid4().hex[:8]}"
         super().save(*args, **kwargs)
 
     def __str__(self):
+        """Chức năng: biểu diễn inference result. Đầu vào: instance. Đầu ra: job id."""
         return f"Result {self.job_id}"
 
 
@@ -69,9 +77,11 @@ class InferenceFeedback(models.Model):
     reviewed_at = models.DateTimeField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
+        """Chức năng: lưu feedback và sinh id. Đầu vào: args/kwargs save. Đầu ra: InferenceFeedback được lưu."""
         if not self.id:
             self.id = f"fb_{uuid.uuid4().hex[:8]}"
         super().save(*args, **kwargs)
 
     def __str__(self):
+        """Chức năng: biểu diễn feedback. Đầu vào: instance. Đầu ra: id và issue_type."""
         return f"Feedback {self.id} - {self.issue_type}"
