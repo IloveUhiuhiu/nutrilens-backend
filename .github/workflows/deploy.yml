@@ -21,25 +21,38 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
-
             APP_DIR="$HOME/nutrilens-backend"
             REPO_URL="https://github.com/IloveUhiuhiu/nutrilens-backend.git"
 
+            # 1. Nếu thư mục dự án hoàn toàn chưa có Git
             if [ ! -d "$APP_DIR/.git" ]; then
-              git clone "$REPO_URL" "$APP_DIR"
+              echo "Thư mục đã có hoặc chưa có, tiến hành init Git tại chỗ..."
+              mkdir -p "$APP_DIR"
+              cd "$APP_DIR"
+              git init
+              git remote add origin "$REPO_URL" || git remote set-url origin "$REPO_URL"
+            else
+              cd "$APP_DIR"
             fi
 
-            cd "$APP_DIR"
+            # 2. Đồng bộ và kéo code mới nhất từ nhánh main về
             git fetch origin main
-            git checkout main
+            git checkout -B main origin/main
             git reset --hard origin/main
 
+            # 3. Kiểm tra nghiêm ngặt sự tồn tại của file .env bạn tự tạo
             if [ ! -f .env ]; then
-              echo "Missing .env on EC2 at $APP_DIR/.env"
+              echo "🚨 LỖI: Không tìm thấy file .env tại $APP_DIR/.env!"
               exit 1
             fi
 
+            # 4. Khởi chạy Docker Compose (Nạp file .env có sẵn)
+            docker compose down
             docker compose up --build -d
+
+            # 5. Thực hiện các lệnh quản trị Django nội bộ
             docker compose exec -T web python manage.py migrate --noinput
             docker compose exec -T web python manage.py collectstatic --noinput
+            
+            # Dọn dẹp các Docker image rác cũ để tiết kiệm ổ cứng 30GB
             docker image prune -f
