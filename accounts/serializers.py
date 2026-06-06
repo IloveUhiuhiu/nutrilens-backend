@@ -1,7 +1,9 @@
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import Group
+from django.conf import settings
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
+from core.cloudinary_upload import upload_image_to_cloudinary
 from .models import ActivityLevel, QuotaConfig, User, WeightHistory
 
 
@@ -110,6 +112,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "full_name",
+            "avatar_url",
             "email",
             "phone_number",
             "gender",
@@ -124,18 +127,39 @@ class ProfileSerializer(serializers.ModelSerializer):
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
     weight = serializers.FloatField(write_only=True, required=False, min_value=1)
+    avatar = serializers.ImageField(write_only=True, required=False)
 
     class Meta:
         model = User
-        fields = ("height", "weight", "activity_level", "birth_date")
+        fields = (
+            "full_name",
+            "phone_number",
+            "gender",
+            "height",
+            "weight",
+            "activity_level",
+            "birth_date",
+            "avatar",
+        )
         extra_kwargs = {
+            "full_name": {"required": False, "allow_blank": True},
+            "phone_number": {"required": False, "allow_blank": True, "allow_null": True},
+            "gender": {"required": False},
             "height": {"required": False, "min_value": 1},
             "activity_level": {"required": False},
+            "birth_date": {"required": False},
         }
 
     def update(self, instance, validated_data):
         """Chức năng: cập nhật profile và TDEE. Đầu vào: user, validated_data. Đầu ra: user đã cập nhật."""
         weight = validated_data.pop("weight", None)
+        avatar = validated_data.pop("avatar", None)
+        if avatar:
+            instance.avatar_url = upload_image_to_cloudinary(
+                avatar,
+                public_id=f"{instance.id}/avatar",
+                folder=settings.CLOUDINARY_AVATAR_FOLDER,
+            )
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()

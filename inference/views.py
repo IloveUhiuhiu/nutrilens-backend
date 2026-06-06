@@ -34,7 +34,7 @@ def image_inference(request):
             with job.image.open("rb") as image_file:
                 job.image_url = upload_image_to_cloudinary(
                     image_file,
-                    public_id=job.id,
+                    public_id=f"{job.id}/original",
                 )
             job.save(update_fields=["image_url", "updated_at"])
         except CloudinaryUploadError as exc:

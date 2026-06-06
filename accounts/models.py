@@ -58,6 +58,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
     full_name = models.CharField(max_length=150, blank=True, null=True)
+    avatar_url = models.URLField(max_length=1000, blank=True)
 
     username = None 
     first_name = None

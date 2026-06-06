@@ -21,6 +21,7 @@ from core.api import (
     paginate_queryset,
     validation_error_response,
 )
+from core.cloudinary_upload import CloudinaryUploadError
 from .models import ActivityLevel, QuotaConfig, User
 from .serializers import (
     AccountRoleSerializer,
@@ -386,7 +387,14 @@ def profile(request):
     serializer = ProfileUpdateSerializer(request.user, data=request.data, partial=True)
     if not serializer.is_valid():
         return validation_error_response(serializer)
-    user = serializer.save()
+    try:
+        user = serializer.save()
+    except CloudinaryUploadError as exc:
+        return api_response(
+            exc.public_message,
+            status_code=exc.status_code,
+            errors={"avatar": [exc.detail or exc.public_message]},
+        )
     return api_response(
         message="Profile updated successfully.",
         data=ProfileSerializer(user).data,
