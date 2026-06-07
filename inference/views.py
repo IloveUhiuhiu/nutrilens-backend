@@ -83,6 +83,12 @@ def job_result(request, id):
     job = InferenceJob.objects.filter(id=id, user=request.user).first()
     if not job:
         return not_found_response("Inference job not found.")
+    if job.status == "failed":
+        return api_response(
+            "Inference job failed.",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            errors={"inference": [job.error_message or "Inference job failed."]},
+        )
     result = InferenceResult.objects.filter(job=job).first()
     if not result:
         return not_found_response("Inference result not found.")
