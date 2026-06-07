@@ -2,7 +2,30 @@ from django.test import TestCase
 
 from nutrients.models import IngredientPhysicalData
 
+from .serializers import InferenceJobCreateSerializer
 from .services import normalize_ai_result
+
+
+class InferenceJobCreateSerializerTests(TestCase):
+    def test_mobile_intrinsics_metadata_does_not_require_camera_height(self):
+        serializer = InferenceJobCreateSerializer()
+
+        metadata = serializer.validate_camera_metadata(
+            {
+                "width": 3024,
+                "height": 4032,
+                "fx": 2685.2,
+                "fy": 2688.4,
+                "cx": 1512,
+                "cy": 2016,
+            }
+        )
+
+        self.assertEqual(metadata["camera_width"], 3024)
+        self.assertEqual(metadata["camera_height"], 4032)
+        self.assertEqual(metadata["camera_area"], 3024 * 4032)
+        self.assertEqual(metadata["intrinsics"]["fx"], 2685.2)
+        self.assertEqual(metadata["intrinsics"]["fy"], 2688.4)
 
 
 class NormalizeAIResultNutritionTests(TestCase):

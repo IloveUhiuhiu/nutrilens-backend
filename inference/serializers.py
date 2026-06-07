@@ -38,16 +38,54 @@ class InferenceJobCreateSerializer(serializers.ModelSerializer):
     def validate_camera_metadata(self, value):
         """Chức năng: kiểm tra metadata camera. Đầu vào: dict hoặc JSON string. Đầu ra: dict hợp lệ."""
         metadata = self._parse_json_object(value, "camera_metadata")
+        metadata = self._normalize_mobile_camera_metadata(metadata)
         if "distance_cm" in metadata and "camera_height_cm" not in metadata and "camera_height_mm" not in metadata:
             metadata["camera_height_cm"] = metadata["distance_cm"]
-        has_camera_height = "camera_height_cm" in metadata or "camera_height_mm" in metadata
-        has_pixel_area = "pixel_area_cm2" in metadata
-        has_intrinsics = "fx" in metadata and "fy" in metadata
-        if not has_camera_height:
-            raise serializers.ValidationError("camera_height_cm or camera_height_mm is required.")
+        has_physical_camera_height = "camera_height_cm" in metadata or "camera_height_mm" in metadata
+        has_pixel_area = "pixel_area_cm2" in metadata or "camera_area" in metadata
+        has_intrinsics = self._has_camera_intrinsics(metadata)
+        if not has_physical_camera_height and not has_intrinsics:
+            raise serializers.ValidationError("camera_height_cm/camera_height_mm or camera intrinsics fx/fy is required.")
         if not has_pixel_area and not has_intrinsics:
             raise serializers.ValidationError("pixel_area_cm2 or camera intrinsics fx/fy is required.")
         return metadata
+
+    def _normalize_mobile_camera_metadata(self, metadata):
+        """Chức năng: bổ sung alias metadata ảnh mobile. Đầu vào: metadata. Đầu ra: metadata đã chuẩn hóa."""
+        width = self._number_value(metadata.get("camera_width") or metadata.get("width"))
+        height = self._number_value(metadata.get("camera_height") or metadata.get("height"))
+
+        if width is not None:
+            metadata.setdefault("camera_width", width)
+        if height is not None:
+            metadata.setdefault("camera_height", height)
+        if width is not None and height is not None:
+            metadata.setdefault("camera_area", width * height)
+
+        if "intrinsics" not in metadata and "fx" in metadata and "fy" in metadata:
+            metadata["intrinsics"] = {
+                "fx": metadata.get("fx"),
+                "fy": metadata.get("fy"),
+                "cx": metadata.get("cx"),
+                "cy": metadata.get("cy"),
+            }
+
+        return metadata
+
+    def _has_camera_intrinsics(self, metadata):
+        """Chức năng: kiểm tra intrinsics ở root hoặc nested. Đầu vào: metadata. Đầu ra: bool."""
+        intrinsics = metadata.get("intrinsics") or {}
+        return ("fx" in metadata and "fy" in metadata) or ("fx" in intrinsics and "fy" in intrinsics)
+
+    def _number_value(self, value):
+        """Chức năng: ép số metadata. Đầu vào: value bất kỳ. Đầu ra: int/float hoặc None."""
+        if value in (None, ""):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return int(number) if number.is_integer() else number
 
     def _parse_json_object(self, value, field_name):
         """Chức năng: parse JSON object từ multipart. Đầu vào: value và field. Đầu ra: dict hoặc lỗi."""
