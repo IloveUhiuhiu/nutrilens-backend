@@ -10,7 +10,7 @@ from nutrients.models import HealthAdviceRule
 def log_totals(queryset):
     """Chức năng: tính tổng dinh dưỡng logs. Đầu vào: queryset DailyLog. Đầu ra: dict tổng và trung bình."""
     totals = queryset.aggregate(
-        total_calories=Sum("total_calories"),
+        sum_calories=Sum("total_calories"),
         total_protein=Sum("total_protein"),
         total_carbs=Sum("total_carbs"),
         total_fat=Sum("total_fat"),
