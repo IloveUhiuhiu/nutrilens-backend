@@ -72,7 +72,7 @@ def call_ai_analysis_server(job):
         response = exc.response
         detail = ""
         if response is not None:
-            detail = response.text[:1000]
+            detail = _format_ai_error_detail(response)
         raise AIServerError(
             f"AI server returned HTTP {response.status_code if response is not None else 'error'}.",
             code="bad_gateway",
@@ -141,6 +141,31 @@ def _open_job_image(job, stack):
         code="missing_image_url",
         status_code=status.HTTP_400_BAD_REQUEST,
     )
+
+
+def _format_ai_error_detail(response):
+    """Chức năng: rút gọn lỗi JSON từ AI server. Đầu vào: requests.Response. Đầu ra: message dễ đọc."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return response.text[:1000]
+
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        message = detail.get("message") or payload.get("message") or response.text
+        nested_detail = detail.get("detail")
+        step = nested_detail.get("step") if isinstance(nested_detail, dict) else None
+        code = detail.get("code")
+        parts = [str(message)]
+        if code:
+            parts.append(f"code={code}")
+        if step:
+            parts.append(f"step={step}")
+        return "; ".join(parts)[:1000]
+
+    if detail:
+        return str(detail)[:1000]
+    return response.text[:1000]
 
 
 def find_best_ingredient_match(target_name, ingredients, similarity_cutoff=0.6):
