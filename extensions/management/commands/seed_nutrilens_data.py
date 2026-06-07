@@ -23,14 +23,14 @@ ADMIN_EMAILS = (
 FIXED_USER_EMAIL = "baokhongthich29@gmail.com"
 DEFAULT_PASSWORD = "Nutrilens@2026"
 SEED_TARGETS = (
-    # "activity-levels",
-    # "quota-configs",
-    # "health-advice-rules",
-    # "packaged-foods",
-    # "ingredients",
+    "activity-levels",
+    "quota-configs",
+    "health-advice-rules",
+    "packaged-foods",
+    "ingredients",
     "meal-logs",
-    # "admins",
-    # "users",
+    "admins",
+    "users"
 )
 
 VIETNAMESE_LAST_NAMES = (
