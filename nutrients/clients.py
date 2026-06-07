@@ -66,6 +66,51 @@ class BaseExternalClient:
                 status_code=status.HTTP_502_BAD_GATEWAY,
             ) from exc
 
+    def post(self, path, *, params=None, json=None, headers=None):
+        """Chức năng: gọi POST API ngoài. Đầu vào: path, params, JSON body, headers. Đầu ra: JSON payload."""
+        url = f"{self.base_url}{path}"
+        try:
+            response = requests.post(
+                url,
+                params=params,
+                json=json,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.Timeout as exc:
+            raise ExternalLookupError(
+                f"{self.service_name} request timed out.",
+                code="timeout",
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            ) from exc
+        except requests.HTTPError as exc:
+            response = exc.response
+            if response is not None and response.status_code == status.HTTP_404_NOT_FOUND:
+                raise ExternalLookupError(
+                    f"{self.service_name} resource not found.",
+                    code="not_found",
+                    status_code=status.HTTP_404_NOT_FOUND,
+                ) from exc
+            raise ExternalLookupError(
+                f"{self.service_name} returned an error.",
+                code="bad_gateway",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+            ) from exc
+        except requests.RequestException as exc:
+            raise ExternalLookupError(
+                f"{self.service_name} is unavailable.",
+                code="unavailable",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            ) from exc
+        except ValueError as exc:
+            raise ExternalLookupError(
+                f"{self.service_name} returned invalid JSON.",
+                code="invalid_json",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+            ) from exc
+
 
 class OpenFoodFactsClient(BaseExternalClient):
     """Chức năng: client OpenFoodFacts. Đầu vào: settings. Đầu ra: payload sản phẩm barcode."""
@@ -105,18 +150,18 @@ class USDAClient(BaseExternalClient):
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-    def search_foods(self, query, page_size=20, page_number=1):
-        """Chức năng: tìm món trên USDA. Đầu vào: query, page size/page number. Đầu ra: payload search."""
+    def search_foods(self, query, page_size=20, page_number=1, data_types=None):
+        """Chức năng: tìm món trên USDA. Đầu vào: query, phân trang, data types. Đầu ra: payload search."""
         self._require_api_key()
-        return self.get(
-            "/foods/search",
-            params={
-                "api_key": self.api_key,
-                "query": query,
-                "pageSize": page_size,
-                "pageNumber": page_number,
-            },
-        )
+        data_types = data_types if data_types is not None else settings.USDA_SEARCH_DATA_TYPES
+        body = {
+            "query": query,
+            "pageSize": page_size,
+            "pageNumber": page_number,
+        }
+        if data_types:
+            body["dataType"] = list(data_types)
+        return self.post("/foods/search", params={"api_key": self.api_key}, json=body)
 
     def get_food(self, fdc_id):
         """Chức năng: lấy chi tiết món USDA. Đầu vào: fdc_id. Đầu ra: payload detail."""

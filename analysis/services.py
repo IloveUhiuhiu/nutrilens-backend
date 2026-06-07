@@ -108,11 +108,20 @@ def create_meal_from_barcode(user, barcode, servings=1, date=None):
 
 def nutrient_value_from_payload(payload, *names):
     """Chức năng: lấy nutrient từ payload USDA. Đầu vào: payload và tên nutrient. Đầu ra: giá trị số."""
-    nutrients = {item.get("nutrient", {}).get("name", item.get("nutrientName", "")): item for item in payload.get("foodNutrients", [])}
     lowered = {name.lower() for name in names}
-    for name, item in nutrients.items():
+    matched_items = []
+    for item in payload.get("foodNutrients", []):
+        name = item.get("nutrient", {}).get("name", item.get("nutrientName", ""))
         if name.lower() in lowered:
+            matched_items.append(item)
+
+    for item in matched_items:
+        unit_name = item.get("unitName") or item.get("nutrient", {}).get("unitName") or ""
+        if unit_name.upper() == "KCAL":
             return float(item.get("amount") or item.get("value") or 0)
+
+    if matched_items:
+        return float(matched_items[0].get("amount") or matched_items[0].get("value") or 0)
     return 0
 
 

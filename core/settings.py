@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'analysis.apps.AnalysisConfig', # Quản lý nhật ký người dùng và kết quả phân tích từ AI
     'inference.apps.InferenceConfig', # Điều phối pipeline AI ảnh 2D
     'reports.apps.ReportsConfig', # Thống kê dinh dưỡng và dashboard admin
+    'extensions.apps.ExtensionsConfig' # Chứa lệnh khởi tạo dữ liệu
 ]
 
 REST_FRAMEWORK = {
@@ -235,3 +236,9 @@ OPEN_FOOD_FACTS_USER_AGENT = os.getenv(
 
 USDA_BASE_URL = os.getenv("USDA_BASE_URL", "https://api.nal.usda.gov/fdc/v1").rstrip("/")
 USDA_API_KEY = os.getenv("USDA_API_KEY", "")
+USDA_SEARCH_DATA_TYPES = env_list("USDA_SEARCH_DATA_TYPES", "Foundation,SR Legacy,Survey (FNDDS)")
+
+GITHUB_MODELS_TOKEN = os.getenv("GITHUB_MODELS_TOKEN") or os.getenv("GITHUB_TOKEN", "")
+GITHUB_MODELS_ENDPOINT = os.getenv("GITHUB_MODELS_ENDPOINT", "https://models.github.ai/inference").rstrip("/")
+GITHUB_MODELS_TRANSLATION_MODEL = os.getenv("GITHUB_MODELS_TRANSLATION_MODEL", "openai/gpt-4o")
+GITHUB_MODELS_TRANSLATION_TIMEOUT = float(os.getenv("GITHUB_MODELS_TRANSLATION_TIMEOUT", "10"))

@@ -30,6 +30,7 @@ class IngredientPhysicalDataSerializer(serializers.ModelSerializer):
             "fat_per_100g",
             "carb_per_100g",
             "protein_per_100g",
+            "image_url",
             "fdc_id_ref",
         )
 

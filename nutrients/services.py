@@ -1,7 +1,14 @@
+from django.conf import settings
 from django.utils import timezone
 
 from .clients import ExternalLookupError, OpenFoodFactsClient, USDAClient
 from .models import Food, PackagedFood
+from .query_translation import (
+    QueryTranslationError,
+    attach_original_vietnamese_fields,
+    translate_food_query_to_english,
+    translate_usda_results_to_vietnamese,
+)
 
 
 def _to_float(value, default=0):
@@ -82,9 +89,14 @@ def get_or_lookup_barcode(barcode):
     return lookup_and_save_barcode(barcode)
 
 
-def search_usda_foods(query, page_size=20, page_number=1):
-    """Chức năng: tìm món ăn trên USDA. Đầu vào: query, page_size, page_number. Đầu ra: payload USDA."""
-    return USDAClient().search_foods(query, page_size=page_size, page_number=page_number)
+def search_usda_foods(query, page_size=20, page_number=1, data_types=None):
+    """Chức năng: tìm món ăn trên USDA. Đầu vào: query, phân trang, data types. Đầu ra: payload USDA."""
+    return USDAClient().search_foods(
+        query,
+        page_size=page_size,
+        page_number=page_number,
+        data_types=data_types,
+    )
 
 
 def get_usda_food(fdc_id):
@@ -143,7 +155,20 @@ def save_food_from_usda_payload(food_payload):
 
 def search_usda_top_foods(query, limit=5):
     """Chức năng: tìm top món USDA bên ngoài. Đầu vào: query và limit. Đầu ra: kết quả top USDA chưa lưu local."""
-    payload = search_usda_foods(query, page_size=limit, page_number=1)
+    original_query = query
+    try:
+        translated_query, translation_source = translate_food_query_to_english(query)
+    except QueryTranslationError:
+        translated_query = query
+        translation_source = "original_translation_failed"
+
+    data_types = settings.USDA_SEARCH_DATA_TYPES
+    payload = search_usda_foods(
+        translated_query,
+        page_size=limit,
+        page_number=1,
+        data_types=data_types,
+    )
     results = []
     for item in payload.get("foods", [])[:limit]:
         if not item.get("fdcId"):
@@ -152,9 +177,20 @@ def search_usda_top_foods(query, limit=5):
         result["unit"] = "gram"
         result["source"] = "usda"
         results.append(result)
+
+    try:
+        results, result_translation_source = translate_usda_results_to_vietnamese(results)
+    except QueryTranslationError:
+        results = attach_original_vietnamese_fields(results)
+        result_translation_source = "original_translation_failed"
+
     return {
         "source": "usda",
-        "query": query,
+        "query": translated_query,
+        "original_query": original_query,
+        "translation_source": translation_source,
+        "result_translation_source": result_translation_source,
+        "data_types": list(data_types),
         "total_hits": payload.get("totalHits", len(results)),
         "current_page": 1,
         "results": results,

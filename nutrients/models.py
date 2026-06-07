@@ -15,6 +15,7 @@ class IngredientPhysicalData(models.Model):
     fat_per_100g = models.FloatField(verbose_name="Fat/100g")
     carb_per_100g = models.FloatField(verbose_name="Carb/100g")
     protein_per_100g = models.FloatField(verbose_name="Protein/100g")
+    image_url = models.URLField(max_length=500, blank=True, null=True)
     fdc_id_ref = models.CharField(max_length=50, blank=True, null=True, help_text="Mã tham chiếu USDA")
 
     def save(self, *args, **kwargs):

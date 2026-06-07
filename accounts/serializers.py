@@ -5,6 +5,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from core.cloudinary_upload import upload_image_to_cloudinary
 from .models import ActivityLevel, QuotaConfig, User, WeightHistory
+from .services import get_random_default_avatar_url
 
 
 class ActivityLevelSerializer(serializers.ModelSerializer):
@@ -16,6 +17,7 @@ class ActivityLevelSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     weight = serializers.FloatField(write_only=True, min_value=1)
+    avatar = serializers.ImageField(write_only=True, required=False)
 
     class Meta:
         model = User
@@ -29,11 +31,13 @@ class RegisterSerializer(serializers.ModelSerializer):
             "height",
             "weight",
             "activity_level",
+            "avatar",
         )
 
     def create(self, validated_data):
         """Chức năng: tạo user đăng ký. Đầu vào: validated_data. Đầu ra: User chưa active."""
         weight = validated_data.pop("weight")
+        avatar = validated_data.pop("avatar", None)
         user = User.objects.create_user(
             email=validated_data["email"],
             password=validated_data["password"],
@@ -43,8 +47,16 @@ class RegisterSerializer(serializers.ModelSerializer):
             birth_date=validated_data.get("birth_date"),
             height=validated_data.get("height", 0),
             activity_level=validated_data.get("activity_level"),
+            avatar_url="" if avatar else get_random_default_avatar_url(),
             is_active=False,
         )
+        if avatar:
+            user.avatar_url = upload_image_to_cloudinary(
+                avatar,
+                public_id=f"{user.id}/avatar",
+                folder=settings.CLOUDINARY_AVATAR_FOLDER,
+            )
+            user.save(update_fields=["avatar_url"])
         WeightHistory.objects.create(user=user, weight=weight)
         user.refresh_tdee(current_weight=weight)
         return user

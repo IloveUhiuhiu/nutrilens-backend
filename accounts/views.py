@@ -54,6 +54,7 @@ REGISTER_RESPONSE = inline_serializer(
             fields={
                 "id": serializers.CharField(),
                 "email": serializers.EmailField(),
+                "avatar_url": serializers.URLField(),
             },
         ),
         "errors": serializers.JSONField(allow_null=True),
@@ -161,7 +162,11 @@ ACTIVITY_LEVEL_RESPONSE = inline_serializer(
             value={
                 "status_code": 201,
                 "message": "Account registered successfully.",
-                "data": {"id": "user_xxxx", "email": "test@gmail.com"},
+                "data": {
+                    "id": "user_xxxx",
+                    "email": "test@gmail.com",
+                    "avatar_url": "https://res.cloudinary.com/example/avatar.jpg",
+                },
                 "errors": None,
             },
         )
@@ -187,7 +192,7 @@ def register(request):
     return api_response(
         message="Account registered successfully.",
         status_code=status.HTTP_201_CREATED,
-        data={"id": user.id, "email": user.email},
+        data={"id": user.id, "email": user.email, "avatar_url": user.avatar_url},
     )
 
 

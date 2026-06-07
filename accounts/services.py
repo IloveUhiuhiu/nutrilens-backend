@@ -11,6 +11,19 @@ from .tasks import send_otp_email_task
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_AVATAR_URLS = (
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744393/d682979d-f9a2-4c82-928c-a18bd4e8c8e3_apuxzh.jpg",
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744393/a1290405-f5c3-4b9d-a8f1-592b0acf013b_twymq5.jpg",
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744392/e9207b2d-c9d5-4adc-bedd-54426512afc4_ixc99i.jpg",
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744392/49960844-5abc-472e-80a0-f51442acf52c_dbjwby.jpg",
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744377/7600_2_2_05_rhglyj.jpg",
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744375/8200_2_05_pkb66x.jpg",
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744374/8200_2_04_crkb4y.jpg",
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744373/4800_10_09_xfbtwc.jpg",
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744354/4800_9_04_fqdzle.jpg",
+    "https://res.cloudinary.com/dzlscpgi4/image/upload/v1780744342/4500_4_03_p4epg7.jpg",
+)
+
 
 class AccountServiceError(Exception):
     """Chức năng: lỗi nghiệp vụ accounts. Đầu vào: message, field. Đầu ra: exception có field lỗi."""
@@ -24,6 +37,11 @@ class AccountServiceError(Exception):
 def generate_otp():
     """Chức năng: tạo OTP 6 số. Đầu vào: không có. Đầu ra: chuỗi OTP."""
     return f"{random.randint(100000, 999999)}"
+
+
+def get_random_default_avatar_url():
+    """Chức năng: chọn avatar mặc định ngẫu nhiên. Đầu vào: không có. Đầu ra: URL avatar."""
+    return random.choice(DEFAULT_AVATAR_URLS)
 
 
 def issue_otp(contact_info, purpose):
