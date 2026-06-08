@@ -31,12 +31,14 @@ class MealEntrySerializer(serializers.ModelSerializer):
     food = FoodSerializer(read_only=True)
     packaged_food = PackagedFoodSerializer(read_only=True)
     components = MealComponentSerializer(many=True, read_only=True)
+    meal_type = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = MealEntry
         fields = (
             "id",
             "log",
+            "meal_type",
             "food",
             "packaged_food",
             "meal_time",
@@ -58,7 +60,20 @@ class MealEntrySerializer(serializers.ModelSerializer):
             "total_weight",
             "components",
         )
-        read_only_fields = ("id", "log", "meal_time", "confirmed_at")
+        read_only_fields = ("id", "log", "meal_time", "confirmed_at", "meal_type")
+
+    def get_meal_type(self, obj) -> str:
+        if not obj.meal_time:
+            return 'Ăn nhẹ'
+        hour = timezone.localtime(obj.meal_time).hour
+        if 5 <= hour < 11:
+            return 'Bữa sáng'
+        elif 11 <= hour < 15:
+            return 'Bữa trưa'
+        elif 17 <= hour < 22:
+            return 'Bữa tối'
+        else:
+            return 'Ăn nhẹ'
 
 
 class DailyLogSerializer(serializers.ModelSerializer):
