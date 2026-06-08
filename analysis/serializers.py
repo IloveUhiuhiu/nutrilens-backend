@@ -25,6 +25,11 @@ class MealComponentSerializer(serializers.ModelSerializer):
             "fat",
         )
         read_only_fields = ("id", "calculated_weight", "calories", "protein", "carbs", "fat")
+    def get_mask_path(self, obj):
+        request = self.context.get("request")
+        if obj.mask_path and obj.mask_path.startswith("/"):
+            return request.build_absolute_uri(obj.mask_path) if request else obj.mask_path
+        return obj.mask_path
 
 
 class MealEntrySerializer(serializers.ModelSerializer):
@@ -61,6 +66,12 @@ class MealEntrySerializer(serializers.ModelSerializer):
             "components",
         )
         read_only_fields = ("id", "log", "meal_time", "confirmed_at", "meal_type")
+
+    def get_image_path(self, obj):
+        request = self.context.get("request")
+        if obj.image_path and obj.image_path.startswith("/"):
+            return request.build_absolute_uri(obj.image_path) if request else obj.image_path
+        return obj.image_path
 
     def get_meal_type(self, obj) -> str:
         if not obj.meal_time:

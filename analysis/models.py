@@ -48,7 +48,7 @@ class MealEntry(models.Model):
     packaged_food = models.ForeignKey('nutrients.PackagedFood', on_delete=models.SET_NULL, null=True, blank=True)
     
     meal_time = models.DateTimeField(auto_now_add=True)
-    image_path = models.ImageField(upload_to='meal_images/', verbose_name="Ảnh gốc RGB", null=True, blank=True)
+    image_path = models.URLField(max_length=500, verbose_name="URL Ảnh gốc", null=True, blank=True)
     source_type = models.CharField(max_length=50, choices=SOURCE_CHOICES, default="image")
     barcode = models.CharField(max_length=64, blank=True, null=True)
     search_query = models.CharField(max_length=255, blank=True, null=True)
@@ -87,7 +87,7 @@ class MealComponent(models.Model):
     physical_data = models.ForeignKey('nutrients.IngredientPhysicalData', on_delete=models.PROTECT)
     
     component_name = models.CharField(max_length=255, verbose_name="Tên thành phần")
-    mask_path = models.ImageField(upload_to='masks/', verbose_name="Ảnh Mask", null=True, blank=True)
+    mask_path = models.URLField(max_length=500, verbose_name="URL Ảnh Mask", null=True, blank=True)
     
     volume = models.FloatField(verbose_name="Thể tích (cm3)") 
     calculated_weight = models.FloatField(verbose_name="Khối lượng tính toán (g)", editable=False)
