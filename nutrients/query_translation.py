@@ -101,6 +101,93 @@ def translate_food_query_to_english(query):
     return translated_query or query, "github_models"
 
 
+PACKAGED_FOOD_NAME_PROMPT = (
+    "Translate this exact packaged food/product name into a natural, appetizing, "
+    "and concise Vietnamese food title suitable for a health logging UI. "
+    "Avoid literal machine translations."
+)
+
+
+def translate_packaged_food_name_to_vietnamese(name):
+    """Chức năng: dịch tên sản phẩm đóng gói sang tiếng Việt tự nhiên cho UI ghi nhận bữa ăn."""
+    name = (name or "").strip()
+    if not name:
+        return name, "original"
+
+    if not settings.GITHUB_MODELS_TOKEN:
+        logger.warning(
+            "GITHUB_TOKEN/GITHUB_MODELS_TOKEN is not configured; using original packaged food name."
+        )
+        return name, "original_missing_token"
+
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise QueryTranslationError("OpenAI SDK is not installed. Run: pip install openai") from exc
+
+    client = OpenAI(
+        base_url=settings.GITHUB_MODELS_ENDPOINT,
+        api_key=settings.GITHUB_MODELS_TOKEN,
+        timeout=settings.GITHUB_MODELS_TRANSLATION_TIMEOUT,
+    )
+    try:
+        response = client.chat.completions.create(
+            model=settings.GITHUB_MODELS_TRANSLATION_MODEL,
+            temperature=0,
+            top_p=1,
+            max_tokens=80,
+            messages=[
+                {"role": "system", "content": PACKAGED_FOOD_NAME_PROMPT},
+                {"role": "user", "content": name},
+            ],
+        )
+        translated_name = clean_translation(response.choices[0].message.content)
+    except Exception as exc:
+        raise QueryTranslationError("GitHub Models packaged food translation failed.") from exc
+
+    return translated_name or name, "github_models"
+
+
+def translate_food_description_to_vietnamese(description):
+    """Chức năng: dịch tên món USDA sang tiếng Việt tự nhiên cho UI ghi nhận bữa ăn."""
+    description = (description or "").strip()
+    if not description:
+        return description, "original"
+
+    if should_translate_query(description):
+        return description, "original"
+
+    if not settings.GITHUB_MODELS_TOKEN:
+        return description, "original_missing_token"
+
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise QueryTranslationError("OpenAI SDK is not installed. Run: pip install openai") from exc
+
+    client = OpenAI(
+        base_url=settings.GITHUB_MODELS_ENDPOINT,
+        api_key=settings.GITHUB_MODELS_TOKEN,
+        timeout=settings.GITHUB_MODELS_TRANSLATION_TIMEOUT,
+    )
+    try:
+        response = client.chat.completions.create(
+            model=settings.GITHUB_MODELS_TRANSLATION_MODEL,
+            temperature=0,
+            top_p=1,
+            max_tokens=80,
+            messages=[
+                {"role": "system", "content": PACKAGED_FOOD_NAME_PROMPT},
+                {"role": "user", "content": description},
+            ],
+        )
+        translated_name = clean_translation(response.choices[0].message.content)
+    except Exception as exc:
+        raise QueryTranslationError("GitHub Models food description translation failed.") from exc
+
+    return translated_name or description, "github_models"
+
+
 def translate_usda_results_to_vietnamese(results):
     """Chức năng: dịch batch description/category USDA sang tiếng Việt để hiển thị."""
     if not results:

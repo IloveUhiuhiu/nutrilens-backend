@@ -8,6 +8,7 @@ from .models import DailyLog, MealComponent, MealEntry
 
 class MealComponentSerializer(serializers.ModelSerializer):
     physical_data_name = serializers.CharField(source="physical_data.vi_name", read_only=True)
+    mask_path = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = MealComponent
@@ -25,6 +26,7 @@ class MealComponentSerializer(serializers.ModelSerializer):
             "fat",
         )
         read_only_fields = ("id", "calculated_weight", "calories", "protein", "carbs", "fat")
+
     def get_mask_path(self, obj):
         request = self.context.get("request")
         if obj.mask_path and obj.mask_path.startswith("/"):
@@ -37,6 +39,7 @@ class MealEntrySerializer(serializers.ModelSerializer):
     packaged_food = PackagedFoodSerializer(read_only=True)
     components = MealComponentSerializer(many=True, read_only=True)
     meal_type = serializers.SerializerMethodField(read_only=True)
+    image_path = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = MealEntry

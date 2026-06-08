@@ -6,7 +6,10 @@ from .models import Food, PackagedFood
 from .query_translation import (
     QueryTranslationError,
     attach_original_vietnamese_fields,
+    should_translate_query,
+    translate_food_description_to_vietnamese,
     translate_food_query_to_english,
+    translate_packaged_food_name_to_vietnamese,
     translate_usda_results_to_vietnamese,
 )
 
@@ -51,10 +54,16 @@ def save_packaged_food_from_open_food_facts(barcode, payload):
     if not fat_per_serving:
         fat_per_serving = _to_float(nutriments.get("fat_100g")) * scale
 
+    raw_name = product.get("product_name") or product.get("generic_name") or f"Barcode {barcode}"
+    try:
+        translated_name, _ = translate_packaged_food_name_to_vietnamese(raw_name)
+    except QueryTranslationError:
+        translated_name = raw_name
+
     packaged_food, _ = PackagedFood.objects.update_or_create(
         barcode=barcode,
         defaults={
-            "name": product.get("product_name") or product.get("generic_name") or f"Barcode {barcode}",
+            "name": translated_name,
             "brand": product.get("brands") or "",
             "serving_size": serving_size,
             "serving_unit": serving_unit,
@@ -81,12 +90,27 @@ def lookup_and_save_barcode(barcode):
     return save_packaged_food_from_open_food_facts(barcode, payload)
 
 
+def ensure_vietnamese_packaged_food_name(packaged_food):
+    """Chức năng: đảm bảo tên sản phẩm barcode hiển thị bằng tiếng Việt trước khi trả về client."""
+    if not packaged_food or should_translate_query(packaged_food.name):
+        return packaged_food
+    try:
+        translated_name, _ = translate_packaged_food_name_to_vietnamese(packaged_food.name)
+    except QueryTranslationError:
+        return packaged_food
+    if translated_name and translated_name != packaged_food.name:
+        packaged_food.name = translated_name
+        packaged_food.save(update_fields=["name", "updated_at"])
+    return packaged_food
+
+
 def get_or_lookup_barcode(barcode):
     """Chức năng: tra barcode local trước, thiếu thì gọi OFF và lưu. Đầu vào: barcode. Đầu ra: PackagedFood hoặc None."""
     packaged_food = PackagedFood.objects.filter(barcode=barcode, is_active=True).first()
     if packaged_food:
-        return packaged_food
-    return lookup_and_save_barcode(barcode)
+        return ensure_vietnamese_packaged_food_name(packaged_food)
+    packaged_food = lookup_and_save_barcode(barcode)
+    return ensure_vietnamese_packaged_food_name(packaged_food)
 
 
 def search_usda_foods(query, page_size=20, page_number=1, data_types=None):
@@ -139,10 +163,15 @@ def save_food_from_usda_payload(food_payload):
     description = food_payload.get("description") or f"USDA Food {fdc_id}"
     category = food_payload.get("foodCategory", {}).get("description") if isinstance(food_payload.get("foodCategory"), dict) else food_payload.get("foodCategory")
 
+    try:
+        vi_name, _ = translate_food_description_to_vietnamese(description)
+    except QueryTranslationError:
+        vi_name = description
+
     food, _ = Food.objects.update_or_create(
         fdc_id=fdc_id,
         defaults={
-            "vi_name": description,
+            "vi_name": vi_name,
             "en_name": description,
             "category": category or food_payload.get("dataType") or "USDA",
             "external_source": "usda",
@@ -197,7 +226,27 @@ def search_usda_top_foods(query, limit=5):
     }
 
 
+def ensure_vietnamese_food_name(food):
+    """Chức năng: đảm bảo tên món USDA hiển thị bằng tiếng Việt trước khi trả về client."""
+    if not food or should_translate_query(food.vi_name):
+        return food
+    try:
+        translated_name, _ = translate_food_description_to_vietnamese(food.en_name or food.vi_name)
+    except QueryTranslationError:
+        return food
+    if translated_name and translated_name != food.vi_name:
+        food.vi_name = translated_name
+        food.save(update_fields=["vi_name"])
+    return food
+
+
 def get_or_lookup_usda_food(fdc_id):
     """Chức năng: gọi USDA detail và lưu Food được chọn. Đầu vào: fdc_id. Đầu ra: Food."""
+    from .models import Food
+
+    food = Food.objects.filter(fdc_id=fdc_id).first()
+    if food:
+        return ensure_vietnamese_food_name(food)
     payload = get_usda_food(fdc_id)
-    return save_food_from_usda_payload(payload)
+    food = save_food_from_usda_payload(payload)
+    return ensure_vietnamese_food_name(food)

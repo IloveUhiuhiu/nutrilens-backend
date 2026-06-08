@@ -43,7 +43,7 @@ def create_meal_from_inference(user, job_id, date=None, notes=""):
     meal = create_meal_from_totals(
         log,
         source_type="image",
-        image_path=job.image,
+        image_path=job.image_url or (job.image.url if job.image else None),
         inference_job_id=job.id,
         notes=notes,
         total_calories=result.total_calories,
