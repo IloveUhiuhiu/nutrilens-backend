@@ -731,7 +731,7 @@ def admin_activity_level_list_create(request):
         queryset = ActivityLevel.objects.all().order_by("id")
         return api_response(
             message="Activity levels retrieved successfully.",
-            data=ActivityLevelSerializer(queryset, many=True).data,
+            data=paginate_queryset(request, queryset, ActivityLevelSerializer),
         )
 
     serializer = ActivityLevelSerializer(data=request.data)
