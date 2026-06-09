@@ -6,6 +6,57 @@ from nutrients.serializers import FoodSerializer, PackagedFoodSerializer
 from .models import DailyLog, MealComponent, MealEntry
 
 
+class AdminMealEntryListSerializer(serializers.ModelSerializer):
+    user_email = serializers.CharField(source="log.user.email", read_only=True)
+    user_id = serializers.CharField(source="log.user.id", read_only=True)
+    log_date = serializers.DateField(source="log.date", read_only=True)
+
+    class Meta:
+        model = MealEntry
+        fields = (
+            "id",
+            "user_id",
+            "user_email",
+            "log_date",
+            "meal_time",
+            "source_type",
+            "barcode",
+            "search_query",
+            "serving_amount",
+            "serving_unit_label",
+            "is_confirmed",
+            "total_calories",
+            "total_protein",
+            "total_carbs",
+            "total_fat",
+            "total_weight",
+        )
+
+
+class AdminDailyLogSerializer(serializers.ModelSerializer):
+    user_email = serializers.CharField(source="user.email", read_only=True)
+    user_id = serializers.CharField(source="user.id", read_only=True)
+    meal_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DailyLog
+        fields = (
+            "id",
+            "user_id",
+            "user_email",
+            "date",
+            "total_calories",
+            "total_protein",
+            "total_carbs",
+            "total_fat",
+            "total_weight",
+            "meal_count",
+        )
+
+    def get_meal_count(self, obj):
+        return obj.meals.count()
+
+
 class MealComponentSerializer(serializers.ModelSerializer):
     physical_data_name = serializers.CharField(source="physical_data.vi_name", read_only=True)
     mask_path = serializers.SerializerMethodField(read_only=True)

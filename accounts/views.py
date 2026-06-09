@@ -22,8 +22,9 @@ from core.api import (
     validation_error_response,
 )
 from core.cloudinary_upload import CloudinaryUploadError
-from .models import ActivityLevel, QuotaConfig, User
+from .models import AccountOTP, ActivityLevel, QuotaConfig, User
 from .serializers import (
+    AccountOTPAdminSerializer,
     AccountRoleSerializer,
     AccountStatusSerializer,
     ActivityLevelSerializer,
@@ -469,6 +470,8 @@ def logout(request):
     parameters=[
         OpenApiParameter(name="role", type=OpenApiTypes.STR, enum=["admin", "staff", "user"]),
         OpenApiParameter(name="search", type=OpenApiTypes.STR),
+        OpenApiParameter(name="start_date", type=OpenApiTypes.DATE),
+        OpenApiParameter(name="end_date", type=OpenApiTypes.DATE),
         OpenApiParameter(name="page", type=OpenApiTypes.INT),
     ],
     responses={200: ADMIN_ACCOUNT_LIST_RESPONSE, **DEFAULT_ERROR_RESPONSES},
@@ -477,10 +480,12 @@ def logout(request):
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_account_list(request):
-    """Chức năng: API admin danh sách tài khoản. Đầu vào: role/search/page. Đầu ra: danh sách user phân trang."""
+    """Chức năng: API admin danh sách tài khoản. Đầu vào: role/search/date/page. Đầu ra: danh sách user phân trang."""
     queryset = User.objects.all().order_by("-date_joined")
     role = request.query_params.get("role")
     search = request.query_params.get("search")
+    start_date = request.query_params.get("start_date")
+    end_date = request.query_params.get("end_date")
 
     if role == "admin":
         queryset = queryset.filter(is_superuser=True)
@@ -490,7 +495,17 @@ def admin_account_list(request):
         queryset = queryset.filter(is_staff=False, is_superuser=False)
 
     if search:
-        queryset = queryset.filter(Q(email__icontains=search) | Q(phone_number__icontains=search))
+        queryset = queryset.filter(
+            Q(id__icontains=search)
+            | Q(email__icontains=search)
+            | Q(full_name__icontains=search)
+            | Q(phone_number__icontains=search)
+        )
+
+    if start_date:
+        queryset = queryset.filter(date_joined__date__gte=start_date)
+    if end_date:
+        queryset = queryset.filter(date_joined__date__lte=end_date)
 
     return api_response(
         message="Accounts retrieved successfully.",
@@ -618,16 +633,27 @@ def admin_account_role(request, id):
 
 
 @extend_schema(
-    summary="Cấu hình định mức sử dụng",
+    methods=["GET"],
+    summary="Xem cấu hình định mức sử dụng",
+    responses={200: QUOTA_RESPONSE, **DEFAULT_ERROR_RESPONSES},
+)
+@extend_schema(
+    methods=["PUT"],
+    summary="Cập nhật cấu hình định mức sử dụng",
     request=QuotaConfigSerializer,
     responses={200: QUOTA_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
-@api_view(["PUT"])
+@api_view(["GET", "PUT"])
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
-def admin_quota_update(request):
-    """Chức năng: API admin cập nhật quota guest. Đầu vào: guest_scan_limit. Đầu ra: quota đã lưu."""
+def admin_quota(request):
+    """Chức năng: API admin xem/cập nhật quota guest. Đầu vào: GET hoặc guest_scan_limit. Đầu ra: quota."""
     quota, _ = QuotaConfig.objects.get_or_create(key="guest_scan_limit")
+    if request.method == "GET":
+        return api_response(
+            message="Quota retrieved successfully.",
+            data=QuotaConfigSerializer(quota).data,
+        )
     serializer = QuotaConfigSerializer(quota, data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
@@ -635,6 +661,59 @@ def admin_quota_update(request):
     return api_response(
         message="Quota updated successfully.",
         data=serializer.data,
+    )
+
+
+ADMIN_OTP_LIST_RESPONSE = inline_serializer(
+    name="AdminOTPListResponse",
+    fields={
+        "status_code": serializers.IntegerField(),
+        "message": serializers.CharField(),
+        "data": inline_serializer(
+            name="AdminOTPListPage",
+            fields={
+                "count": serializers.IntegerField(),
+                "next": serializers.CharField(allow_null=True, allow_blank=True),
+                "previous": serializers.CharField(allow_null=True, allow_blank=True),
+                "results": serializers.ListField(),
+            },
+        ),
+        "errors": serializers.JSONField(allow_null=True),
+    },
+)
+
+
+@extend_schema(
+    summary="Admin danh sách OTP xác thực",
+    parameters=[
+        OpenApiParameter(name="search", type=OpenApiTypes.STR),
+        OpenApiParameter(name="purpose", type=OpenApiTypes.STR),
+        OpenApiParameter(name="is_verified", type=OpenApiTypes.BOOL),
+        OpenApiParameter(name="page", type=OpenApiTypes.INT),
+    ],
+    responses={200: ADMIN_OTP_LIST_RESPONSE, **DEFAULT_ERROR_RESPONSES},
+)
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+@handle_api_exceptions
+def admin_otp_list(request):
+    """Chức năng: API admin danh sách OTP. Đầu vào: search/purpose/is_verified/page. Đầu ra: danh sách AccountOTP."""
+    from .models import AccountOTP
+    queryset = AccountOTP.objects.all().order_by("-expired_at")
+    search = request.query_params.get("search")
+    purpose = request.query_params.get("purpose")
+    is_verified = request.query_params.get("is_verified")
+
+    if search:
+        queryset = queryset.filter(Q(contact_info__icontains=search) | Q(otp_code__icontains=search))
+    if purpose:
+        queryset = queryset.filter(purpose=purpose)
+    if is_verified is not None:
+        queryset = queryset.filter(is_verified=(is_verified.lower() == "true"))
+
+    return api_response(
+        message="OTP records retrieved successfully.",
+        data=paginate_queryset(request, queryset, AccountOTPAdminSerializer),
     )
 
 

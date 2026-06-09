@@ -2,7 +2,8 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path("quota/", views.admin_quota_update, name="admin_quota_update"),
+    path("quota/", views.admin_quota, name="admin_quota"),
+    path("otp/", views.admin_otp_list, name="admin_otp_list"),
     path("activity-levels/", views.admin_activity_level_list_create, name="admin_activity_level_list_create"),
     path("activity-levels/<int:id>/", views.admin_activity_level_detail, name="admin_activity_level_detail"),
     path("", views.admin_account_list, name="admin_account_list"),

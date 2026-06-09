@@ -4,7 +4,7 @@ from django.conf import settings
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from core.cloudinary_upload import upload_image_to_cloudinary
-from .models import ActivityLevel, QuotaConfig, User, WeightHistory
+from .models import AccountOTP, ActivityLevel, QuotaConfig, User, WeightHistory
 from .services import get_random_default_avatar_url
 
 
@@ -35,7 +35,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         )
 
     def create(self, validated_data):
-        """Chức năng: tạo user đăng ký. Đầu vào: validated_data. Đầu ra: User chưa active."""
         weight = validated_data.pop("weight")
         avatar = validated_data.pop("avatar", None)
         user = User.objects.create_user(
@@ -67,7 +66,6 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
-        """Chức năng: xác thực đăng nhập. Đầu vào: email/password. Đầu ra: refresh/access token."""
         user = authenticate(username=attrs["email"], password=attrs["password"])
         if not user:
             raise serializers.ValidationError("Invalid credentials.")
@@ -101,7 +99,6 @@ class ChangePasswordSerializer(serializers.Serializer):
     new_password = serializers.CharField(write_only=True, min_length=6)
 
     def validate_old_password(self, value):
-        """Chức năng: kiểm tra mật khẩu cũ. Đầu vào: old_password. Đầu ra: value hợp lệ hoặc lỗi."""
         user = self.context["request"].user
         if not user.check_password(value):
             raise serializers.ValidationError("Old password is incorrect.")
@@ -163,7 +160,6 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         }
 
     def update(self, instance, validated_data):
-        """Chức năng: cập nhật profile và TDEE. Đầu vào: user, validated_data. Đầu ra: user đã cập nhật."""
         weight = validated_data.pop("weight", None)
         avatar = validated_data.pop("avatar", None)
         if avatar:
@@ -187,10 +183,20 @@ class AdminAccountListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("id", "full_name", "email", "phone_number", "role", "is_active", "date_joined")
+        fields = (
+            "id",
+            "full_name",
+            "email",
+            "phone_number",
+            "gender",
+            "avatar_url",
+            "role",
+            "is_active",
+            "date_joined",
+            "last_login",
+        )
 
     def get_role(self, obj):
-        """Chức năng: lấy vai trò user. Đầu vào: User. Đầu ra: admin/staff/user."""
         if obj.is_superuser:
             return "admin"
         if obj.is_staff:
@@ -213,10 +219,10 @@ class AdminAccountDetailSerializer(ProfileSerializer):
             "weight_histories",
             "daily_logs",
             "date_joined",
+            "last_login",
         )
 
     def get_role(self, obj):
-        """Chức năng: lấy vai trò user. Đầu vào: User. Đầu ra: admin/staff/user."""
         if obj.is_superuser:
             return "admin"
         if obj.is_staff:
@@ -224,7 +230,6 @@ class AdminAccountDetailSerializer(ProfileSerializer):
         return "user"
 
     def get_daily_logs(self, obj):
-        """Chức năng: lấy 30 daily log gần nhất. Đầu vào: User. Đầu ra: danh sách log tóm tắt."""
         return [
             {
                 "id": log.id,
@@ -256,7 +261,6 @@ class AccountRoleSerializer(serializers.Serializer):
     )
 
     def validate_group_ids(self, value):
-        """Chức năng: kiểm tra group ids. Đầu vào: list id. Đầu ra: list id hợp lệ hoặc lỗi."""
         existing = set(Group.objects.filter(id__in=value).values_list("id", flat=True))
         missing = set(value) - existing
         if missing:
@@ -267,5 +271,19 @@ class AccountRoleSerializer(serializers.Serializer):
 class QuotaConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = QuotaConfig
-        fields = ("guest_scan_limit", "updated_at")
-        read_only_fields = ("updated_at",)
+        fields = ("key", "guest_scan_limit", "updated_at")
+        read_only_fields = ("key", "updated_at")
+
+
+class AccountOTPAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AccountOTP
+        fields = (
+            "id",
+            "contact_info",
+            "otp_code",
+            "purpose",
+            "expired_at",
+            "is_verified",
+        )
+        read_only_fields = fields

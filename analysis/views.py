@@ -19,6 +19,8 @@ from nutrients.services import get_or_lookup_barcode, search_usda_top_foods
 from nutrients.serializers import PackagedFoodSerializer
 from .models import DailyLog, MealEntry
 from .serializers import (
+    AdminDailyLogSerializer,
+    AdminMealEntryListSerializer,
     DailyLogSerializer,
     ManualMealSerializer,
     MealBarcodeSerializer,
@@ -246,17 +248,48 @@ def range_logs(request):
     return api_response("Range logs retrieved successfully.", data=DailyLogSerializer(logs, many=True).data)
 
 
-@extend_schema(summary="Admin danh sách bữa ăn", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(
+    summary="Admin danh sách bữa ăn",
+    parameters=[
+        OpenApiParameter("search", OpenApiTypes.STR),
+        OpenApiParameter("user_id", OpenApiTypes.STR),
+        OpenApiParameter("source_type", OpenApiTypes.STR),
+        OpenApiParameter("start_date", OpenApiTypes.DATE),
+        OpenApiParameter("end_date", OpenApiTypes.DATE),
+        OpenApiParameter("page", OpenApiTypes.INT),
+    ],
+    responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES},
+)
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_meal_list(request):
-    """Chức năng: API admin danh sách meal. Đầu vào: user_id/page tùy chọn. Đầu ra: danh sách MealEntry phân trang."""
+    """Chức năng: API admin danh sách meal. Đầu vào: search/user_id/source_type/date/page. Đầu ra: danh sách MealEntry phân trang."""
+    from django.db.models import Q
     queryset = MealEntry.objects.all().select_related("log", "log__user", "food", "packaged_food").order_by("-meal_time")
     user_id = request.query_params.get("user_id")
+    search = request.query_params.get("search")
+    source_type = request.query_params.get("source_type")
+    start_date = request.query_params.get("start_date")
+    end_date = request.query_params.get("end_date")
+
     if user_id:
         queryset = queryset.filter(log__user_id=user_id)
-    return api_response("Meals retrieved successfully.", data=paginate_queryset(request, queryset, MealEntrySerializer))
+    if search:
+        queryset = queryset.filter(
+            Q(id__icontains=search)
+            | Q(log__user__email__icontains=search)
+            | Q(barcode__icontains=search)
+            | Q(search_query__icontains=search)
+        )
+    if source_type:
+        queryset = queryset.filter(source_type=source_type)
+    if start_date:
+        queryset = queryset.filter(log__date__gte=start_date)
+    if end_date:
+        queryset = queryset.filter(log__date__lte=end_date)
+
+    return api_response("Meals retrieved successfully.", data=paginate_queryset(request, queryset, AdminMealEntryListSerializer))
 
 
 @extend_schema(summary="Admin chi tiết bữa ăn", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
@@ -271,17 +304,41 @@ def admin_meal_detail(request, id):
     return api_response("Meal retrieved successfully.", data=MealEntrySerializer(meal).data)
 
 
-@extend_schema(summary="Admin danh sách nhật ký", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
+@extend_schema(
+    summary="Admin danh sách nhật ký",
+    parameters=[
+        OpenApiParameter("search", OpenApiTypes.STR),
+        OpenApiParameter("user_id", OpenApiTypes.STR),
+        OpenApiParameter("start_date", OpenApiTypes.DATE),
+        OpenApiParameter("end_date", OpenApiTypes.DATE),
+        OpenApiParameter("page", OpenApiTypes.INT),
+    ],
+    responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES},
+)
 @api_view(["GET"])
 @permission_classes([IsAdminUser])
 @handle_api_exceptions
 def admin_log_list(request):
-    """Chức năng: API admin danh sách log. Đầu vào: user_id/page tùy chọn. Đầu ra: danh sách DailyLog phân trang."""
-    queryset = DailyLog.objects.all().select_related("user").order_by("-date")
+    """Chức năng: API admin danh sách log. Đầu vào: search/user_id/date/page. Đầu ra: danh sách DailyLog phân trang."""
+    from django.db.models import Q
+    queryset = DailyLog.objects.all().select_related("user").prefetch_related("meals").order_by("-date")
     user_id = request.query_params.get("user_id")
+    search = request.query_params.get("search")
+    start_date = request.query_params.get("start_date")
+    end_date = request.query_params.get("end_date")
+
     if user_id:
         queryset = queryset.filter(user_id=user_id)
-    return api_response("Daily logs retrieved successfully.", data=paginate_queryset(request, queryset, DailyLogSerializer))
+    if search:
+        queryset = queryset.filter(
+            Q(id__icontains=search) | Q(user__email__icontains=search)
+        )
+    if start_date:
+        queryset = queryset.filter(date__gte=start_date)
+    if end_date:
+        queryset = queryset.filter(date__lte=end_date)
+
+    return api_response("Daily logs retrieved successfully.", data=paginate_queryset(request, queryset, AdminDailyLogSerializer))
 
 
 @extend_schema(summary="Admin chi tiết nhật ký", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
