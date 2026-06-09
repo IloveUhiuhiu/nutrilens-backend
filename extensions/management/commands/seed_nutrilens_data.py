@@ -1,5 +1,7 @@
 import random
+import re
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
@@ -15,6 +17,8 @@ from nutrients.clients import ExternalLookupError
 from nutrients.models import HealthAdviceRule, IngredientPhysicalData, PackagedFood
 from nutrients.services import lookup_and_save_barcode, save_food_from_usda_payload, search_usda_foods
 
+from core.cloudinary_upload import CloudinaryUploadError, upload_image_to_cloudinary
+
 
 ADMIN_EMAILS = (
     "dangphuclong2019@gmail.com",
@@ -22,6 +26,13 @@ ADMIN_EMAILS = (
 )
 FIXED_USER_EMAIL = "baokhongthich29@gmail.com"
 DEFAULT_PASSWORD = "Nutrilens@2026"
+ICON_DIR = "/home/dngphclng/Downloads/mycollection/png"
+FALLBACK_ICON_NAMES = (
+    "041-diet.png",
+    "042-burger.png",
+    "043-diet-1.png",
+    "044-vegetables.png",
+)
 SEED_TARGETS = (
     "activity-levels",
     "quota-configs",
@@ -30,7 +41,11 @@ SEED_TARGETS = (
     "ingredients",
     "meal-logs",
     "admins",
-    "users"
+    "users",
+)
+ALL_SEED_TARGETS = SEED_TARGETS + (
+    "ingredient-images",
+    "last-login",
 )
 
 VIETNAMESE_LAST_NAMES = (
@@ -6805,6 +6820,130 @@ def seed_meal_logs(stdout=None, style=None):
     }
 
 
+def _extract_file_stem(filename):
+    """Trích xuất tên gốc từ tên file icon, bỏ prefix số và hậu tố trùng lặp."""
+    stem = re.sub(r'\.png$', '', filename, flags=re.IGNORECASE)
+    stem = re.sub(r'^\d+-', '', stem)
+    stem = re.sub(r'\(\d+\)$', '', stem).strip()
+    return stem
+
+
+def _normalize_name(name):
+    """Chuẩn hóa tên: lowercase, thay dấu phân cách bằng khoảng trắng đơn."""
+    text = name.lower().strip()
+    text = re.sub(r'[-_()\s]+', ' ', text).strip()
+    return text
+
+
+def _singularize(text):
+    """Chuyển về dạng số ít gần đúng để đối chiếu tên nguyên liệu."""
+    if text.endswith('ies'):
+        return text[:-3] + 'y'
+    if text.endswith('oes'):
+        return text[:-2]
+    if text.endswith('s') and not text.endswith('ss') and len(text) > 2:
+        return text[:-1]
+    return text
+
+
+def _name_variants(name):
+    """Tạo tập hợp biến thể chuẩn hóa (số ít/số nhiều) của tên để đối chiếu."""
+    norm = _normalize_name(name)
+    singular = _singularize(norm)
+    variants = {norm, singular}
+    for base in list(variants):
+        if not base.endswith('s'):
+            variants.add(base + 's')
+        if base.endswith('y') and len(base) > 1:
+            variants.add(base[:-1] + 'ies')
+        if base.endswith('o'):
+            variants.add(base + 'es')
+    return variants
+
+
+def build_icon_mapping(icon_dir):
+    """Quét thư mục icon và tạo bảng ánh xạ tên chuẩn hóa → đường dẫn file."""
+    mapping = {}
+    for filepath in sorted(Path(icon_dir).glob('*.png')):
+        stem = _extract_file_stem(filepath.name)
+        norm = _normalize_name(stem)
+        singular = _singularize(norm)
+        mapping.setdefault(norm, filepath)
+        mapping.setdefault(singular, filepath)
+    return mapping
+
+
+def seed_ingredient_images(icon_dir, stdout=None, style=None):
+    """Upload ảnh icon nguyên liệu lên Cloudinary và cập nhật image_url trong IngredientPhysicalData."""
+    icon_path = Path(icon_dir)
+    fallback_files = [
+        icon_path / name for name in FALLBACK_ICON_NAMES
+        if (icon_path / name).exists()
+    ]
+    icon_mapping = build_icon_mapping(icon_dir)
+
+    updated = 0
+    fallback_used = 0
+    failed = 0
+
+    for ingredient in IngredientPhysicalData.objects.all().order_by('fdc_id_ref'):
+        matched_file = None
+        for variant in _name_variants(ingredient.en_name):
+            if variant in icon_mapping:
+                matched_file = icon_mapping[variant]
+                break
+
+        if matched_file is None:
+            if not fallback_files:
+                failed += 1
+                if stdout:
+                    stdout.write(style.WARNING(f"Không tìm thấy icon và không có fallback: {ingredient.en_name}"))
+                continue
+            matched_file = random.choice(fallback_files)
+            fallback_used += 1
+
+        public_id = re.sub(r'[^a-z0-9-]', '-', ingredient.fdc_id_ref.lower())
+
+        try:
+            with open(matched_file, 'rb') as img_file:
+                image_url = upload_image_to_cloudinary(
+                    img_file,
+                    public_id=public_id,
+                    folder='nutrilens/ingredients',
+                )
+            ingredient.image_url = image_url
+            ingredient.save(update_fields=['image_url'])
+            updated += 1
+            if stdout:
+                stdout.write(style.SUCCESS(f"Uploaded: {ingredient.en_name} ← {matched_file.name}"))
+        except CloudinaryUploadError as exc:
+            failed += 1
+            if stdout:
+                stdout.write(style.WARNING(f"Upload thất bại cho {ingredient.en_name}: {exc}"))
+
+    return {'updated': updated, 'fallback_used': fallback_used, 'failed': failed}
+
+
+def seed_last_login(stdout=None, style=None):
+    """Cập nhật last_login cho tất cả tài khoản seed trong 30 ngày gần nhất."""
+    User = get_user_model()
+    now = timezone.now()
+    seed_emails = list(ADMIN_EMAILS) + list(seed_history_user_emails())
+    users = list(User.objects.filter(email__in=seed_emails))
+
+    rng = random.Random()
+    updated = 0
+    for user in users:
+        seconds_ago = rng.randint(0, 30 * 24 * 3600)
+        user.last_login = now - timedelta(seconds=seconds_ago)
+        user.save(update_fields=['last_login'])
+        updated += 1
+        if stdout:
+            stdout.write(style.SUCCESS(f"Updated last_login: {user.email}"))
+
+    return {'updated': updated}
+
+
 def selected_seed_targets(options):
     """Chức năng: tính danh sách nhóm dữ liệu cần seed từ --only/--skip."""
     only = set(options.get("only") or [])
@@ -6833,14 +6972,14 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--only",
-            choices=SEED_TARGETS,
+            choices=ALL_SEED_TARGETS,
             action="append",
             default=[],
             help="Only seed this target. Can be used multiple times.",
         )
         parser.add_argument(
             "--skip",
-            choices=SEED_TARGETS,
+            choices=ALL_SEED_TARGETS,
             action="append",
             default=[],
             help="Skip this target. Can be used multiple times.",
@@ -6870,6 +7009,8 @@ class Command(BaseCommand):
             "skipped_usda_queries": 0,
             "deleted_old_meals": 0,
         }
+        ingredient_image_summary = {"updated": 0, "fallback_used": 0, "failed": 0}
+        last_login_summary = {"updated": 0}
         current_superusers = User.objects.filter(is_superuser=True).count()
 
         # Bước 1: tạo hoặc cập nhật các mức vận động trước khi tạo user.
@@ -7023,6 +7164,23 @@ class Command(BaseCommand):
                     )
                 )
 
+        # Bước 7: upload ảnh icon nguyên liệu lên Cloudinary và cập nhật image_url.
+        if "ingredient-images" in targets:
+            ingredient_image_summary = seed_ingredient_images(ICON_DIR, self.stdout, self.style)
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Seeded ingredient images: "
+                    f"{ingredient_image_summary['updated']} updated, "
+                    f"{ingredient_image_summary['fallback_used']} used fallback, "
+                    f"{ingredient_image_summary['failed']} failed"
+                )
+            )
+
+        # Bước 8: cập nhật last_login cho tất cả tài khoản seed.
+        if "last-login" in targets:
+            last_login_summary = seed_last_login(self.stdout, self.style)
+            self.stdout.write(self.style.SUCCESS(f"Updated last_login: {last_login_summary['updated']} accounts"))
+
         self.stdout.write(self.style.SUCCESS("NutriLens seed data completed successfully."))
         self.stdout.write(self.style.SUCCESS(f"Activity levels: {len(activity_levels)}"))
         self.stdout.write(self.style.SUCCESS(f"Quota configs: {len(quota_configs)}"))
@@ -7037,4 +7195,6 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Deleted old seed history meals: {meal_history_summary['deleted_old_meals']}"))
         self.stdout.write(self.style.SUCCESS(f"Superusers in database: {current_superusers}"))
         self.stdout.write(self.style.SUCCESS(f"Seeded normal users: {len(normal_user_payloads)}"))
+        self.stdout.write(self.style.SUCCESS(f"Ingredient image uploads: {ingredient_image_summary['updated']} updated, {ingredient_image_summary['failed']} failed"))
+        self.stdout.write(self.style.SUCCESS(f"Last login updates: {last_login_summary['updated']} accounts"))
         self.stdout.write(self.style.SUCCESS(f"Default password: {DEFAULT_PASSWORD}"))
