@@ -1087,10 +1087,15 @@ paths:
   /api/v1/admin/accounts/:
     get:
       operationId: v1_admin_accounts_retrieve
-      description: 'Chức năng: API admin danh sách tài khoản. Đầu vào: role/search/page.
+      description: 'Chức năng: API admin danh sách tài khoản. Đầu vào: role/search/date/page.
         Đầu ra: danh sách user phân trang.'
       summary: Danh sách & tìm kiếm tài khoản
       parameters:
+      - in: query
+        name: end_date
+        schema:
+          type: string
+          format: date
       - in: query
         name: page
         schema:
@@ -1107,6 +1112,11 @@ paths:
         name: search
         schema:
           type: string
+      - in: query
+        name: start_date
+        schema:
+          type: string
+          format: date
       tags:
       - v1
       security:
@@ -1237,6 +1247,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/CoreApiErrorResponse'
           description: ''
+  /api/v1/admin/accounts/{id}/permissions/:
+    get:
+      operationId: v1_admin_accounts_permissions_retrieve
+      description: Xem toàn bộ quyền hiệu lực của một user (từ groups + user_permissions).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v1/admin/accounts/{id}/reset/:
     post:
       operationId: v1_admin_accounts_reset_create
@@ -1858,12 +1885,158 @@ paths:
               schema:
                 $ref: '#/components/schemas/CoreApiErrorResponse'
           description: ''
+  /api/v1/admin/accounts/otp/:
+    get:
+      operationId: v1_admin_accounts_otp_retrieve
+      description: 'Chức năng: API admin danh sách OTP. Đầu vào: search/purpose/is_verified/page.
+        Đầu ra: danh sách AccountOTP.'
+      summary: Admin danh sách OTP xác thực
+      parameters:
+      - in: query
+        name: is_verified
+        schema:
+          type: boolean
+      - in: query
+        name: page
+        schema:
+          type: integer
+      - in: query
+        name: purpose
+        schema:
+          type: string
+      - in: query
+        name: search
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOTPListResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '504':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
   /api/v1/admin/accounts/quota/:
+    get:
+      operationId: v1_admin_accounts_quota_retrieve
+      description: 'Chức năng: API admin xem/cập nhật quota guest. Đầu vào: GET hoặc
+        guest_scan_limit. Đầu ra: quota.'
+      summary: Xem cấu hình định mức sử dụng
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '502':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '504':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoreApiErrorResponse'
+          description: ''
     put:
       operationId: v1_admin_accounts_quota_update
-      description: 'Chức năng: API admin cập nhật quota guest. Đầu vào: guest_scan_limit.
-        Đầu ra: quota đã lưu.'
-      summary: Cấu hình định mức sử dụng
+      description: 'Chức năng: API admin xem/cập nhật quota guest. Đầu vào: GET hoặc
+        guest_scan_limit. Đầu ra: quota.'
+      summary: Cập nhật cấu hình định mức sử dụng
       tags:
       - v1
       requestBody:
@@ -1937,9 +2110,32 @@ paths:
   /api/v1/admin/analysis/logs/:
     get:
       operationId: v1_admin_analysis_logs_retrieve
-      description: 'Chức năng: API admin danh sách log. Đầu vào: user_id/page tùy
-        chọn. Đầu ra: danh sách DailyLog phân trang.'
+      description: 'Chức năng: API admin danh sách log. Đầu vào: search/user_id/date/page.
+        Đầu ra: danh sách DailyLog phân trang.'
       summary: Admin danh sách nhật ký
+      parameters:
+      - in: query
+        name: end_date
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: page
+        schema:
+          type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+      - in: query
+        name: start_date
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: user_id
+        schema:
+          type: string
       tags:
       - v1
       security:
@@ -2075,9 +2271,36 @@ paths:
   /api/v1/admin/analysis/meals/:
     get:
       operationId: v1_admin_analysis_meals_retrieve
-      description: 'Chức năng: API admin danh sách meal. Đầu vào: user_id/page tùy
-        chọn. Đầu ra: danh sách MealEntry phân trang.'
+      description: 'Chức năng: API admin danh sách meal. Đầu vào: search/user_id/source_type/date/page.
+        Đầu ra: danh sách MealEntry phân trang.'
       summary: Admin danh sách bữa ăn
+      parameters:
+      - in: query
+        name: end_date
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: page
+        schema:
+          type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+      - in: query
+        name: source_type
+        schema:
+          type: string
+      - in: query
+        name: start_date
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: user_id
+        schema:
+          type: string
       tags:
       - v1
       security:
@@ -2210,6 +2433,87 @@ paths:
               schema:
                 $ref: '#/components/schemas/CoreApiErrorResponse'
           description: ''
+  /api/v1/admin/auth/groups/:
+    get:
+      operationId: v1_admin_auth_groups_retrieve
+      description: Danh sách và tạo Django Group.
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_admin_auth_groups_create
+      description: Danh sách và tạo Django Group.
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/admin/auth/groups/{id}/:
+    get:
+      operationId: v1_admin_auth_groups_retrieve_2
+      description: Chi tiết, cập nhật, xóa một Django Group.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    patch:
+      operationId: v1_admin_auth_groups_partial_update
+      description: Chi tiết, cập nhật, xóa một Django Group.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_admin_auth_groups_destroy
+      description: Chi tiết, cập nhật, xóa một Django Group.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/admin/auth/permissions/:
+    get:
+      operationId: v1_admin_auth_permissions_retrieve
+      description: Danh sách tất cả Django Permission (dùng để gán vào Group).
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v1/admin/inference/feedback/:
     get:
       operationId: v1_admin_inference_feedback_retrieve
@@ -6370,6 +6674,10 @@ components:
         date_joined:
           type: string
           format: date-time
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
       required:
       - activity_level
       - bmi
@@ -6415,6 +6723,12 @@ components:
           type: string
           nullable: true
           maxLength: 20
+        gender:
+          $ref: '#/components/schemas/GenderEnum'
+        avatar_url:
+          type: string
+          format: uri
+          maxLength: 1000
         role:
           type: string
           readOnly: true
@@ -6426,6 +6740,10 @@ components:
         date_joined:
           type: string
           format: date-time
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
       required:
       - email
       - id
@@ -6460,6 +6778,41 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/AdminAccountListPage'
+        errors:
+          nullable: true
+      required:
+      - data
+      - errors
+      - message
+      - status_code
+    AdminOTPListPage:
+      type: object
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          nullable: true
+        previous:
+          type: string
+          nullable: true
+        results:
+          type: array
+          items: {}
+      required:
+      - count
+      - next
+      - previous
+      - results
+    AdminOTPListResponse:
+      type: object
+      properties:
+        status_code:
+          type: integer
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/AdminOTPListPage'
         errors:
           nullable: true
       required:
@@ -7312,6 +7665,9 @@ components:
     QuotaConfig:
       type: object
       properties:
+        key:
+          type: string
+          readOnly: true
         guest_scan_limit:
           type: integer
           maximum: 2147483647
@@ -7321,6 +7677,7 @@ components:
           format: date-time
           readOnly: true
       required:
+      - key
       - updated_at
     QuotaResponse:
       type: object

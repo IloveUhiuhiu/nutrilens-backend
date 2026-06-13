@@ -35,7 +35,9 @@ def create_meal_from_inference(user, job_id, date=None, notes=""):
     job = InferenceJob.objects.filter(id=job_id, user=user).first()
     if not job:
         raise AnalysisServiceError("Inference job not found.", field="job_id")
-    if job.status != "succeeded" or not hasattr(job, "result"):
+    if job.status == "failed":
+        raise AnalysisServiceError("Inference job failed.", field="job_id")
+    if not hasattr(job, "result"):
         raise AnalysisServiceError("Inference result is not ready.", field="job_id")
 
     log = get_or_create_daily_log(user, date)
