@@ -1,6 +1,8 @@
 from functools import wraps
 import logging
+import traceback
 
+from django.conf import settings
 from drf_spectacular.utils import inline_serializer
 from rest_framework import serializers, status
 from rest_framework.pagination import PageNumberPagination
@@ -96,10 +98,13 @@ def handle_api_exceptions(view_func):
             return view_func(request, *args, **kwargs)
         except Exception as exc:
             logger.exception("Unhandled API error in %s", view_func.__name__)
+            detail = "An unexpected error occurred."
+            if settings.DEBUG:
+                detail = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
             return api_response(
                 message="Internal server error.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                errors={"detail": ["An unexpected error occurred."]},
+                errors={"detail": [detail]},
             )
 
     return wrapper
