@@ -24,7 +24,7 @@ from core.api import (
     validation_error_response,
 )
 from core.cloudinary_upload import CloudinaryUploadError
-from .models import AccountOTP, ActivityLevel, QuotaConfig, User
+from .models import AccountOTP, ActivityLevel, QuotaConfig, User, WeightHistory
 from .serializers import (
     AccountOTPAdminSerializer,
     AccountRoleSerializer,
@@ -43,6 +43,7 @@ from .serializers import (
     QuotaConfigSerializer,
     RegisterSerializer,
     ResetPasswordSerializer,
+    WeightHistorySerializer,
 )
 from .services import AccountServiceError, issue_otp, reset_password_with_otp, update_account_role, update_account_status, verify_account_otp
 
@@ -406,6 +407,32 @@ def profile(request):
     return api_response(
         message="Profile updated successfully.",
         data=ProfileSerializer(user).data,
+    )
+
+
+@extend_schema(
+    summary="Lịch sử cân nặng của người dùng",
+    parameters=[
+        OpenApiParameter("from", OpenApiTypes.DATE),
+        OpenApiParameter("to", OpenApiTypes.DATE),
+    ],
+    responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES},
+)
+@api_view(["GET"])
+@permission_classes([require_perm("accounts.view_weighthistory")])
+@handle_api_exceptions
+def weight_history(request):
+    """Chức năng: API lịch sử cân nặng user. Đầu vào: from/to tùy chọn. Đầu ra: danh sách cân nặng theo thời gian."""
+    queryset = WeightHistory.objects.filter(user=request.user).order_by("measured_at")
+    date_from = request.query_params.get("from")
+    date_to = request.query_params.get("to")
+    if date_from:
+        queryset = queryset.filter(measured_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(measured_at__date__lte=date_to)
+    return api_response(
+        message="Weight history retrieved successfully.",
+        data=WeightHistorySerializer(queryset, many=True).data,
     )
 
 

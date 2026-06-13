@@ -49,17 +49,32 @@ def user_nutrition_trends(user, date_from, date_to):
     ]
 
 
+ADVICE_TITLES = {
+    "normal": "Đang trong vùng an toàn",
+    "warning": "Gần chạm giới hạn",
+    "danger": "Đã vượt mục tiêu",
+}
+
+
 def user_nutrition_advice(user, date=None):
     """Chức năng: lấy tư vấn dinh dưỡng user. Đầu vào: user và ngày. Đầu ra: dict advice."""
     date = date or timezone.localdate()
     log = DailyLog.objects.filter(user=user, date=date).first()
     percent = round((log.total_calories / user.tdee * 100), 2) if log and user.tdee else 0
     rule = HealthAdviceRule.objects.filter(min_percent__lte=percent, max_percent__gte=percent).first()
+    alert_level = rule.alert_level if rule else "normal"
+    advice_content = rule.advice_content if rule else ""
     return {
         "date": date,
         "tdee_percent": percent,
-        "alert_level": rule.alert_level if rule else "normal",
-        "advice_content": rule.advice_content if rule else "",
+        "ratio": round(percent / 100, 4),
+        "alert_level": alert_level,
+        "status": alert_level,
+        "title": ADVICE_TITLES.get(alert_level, ADVICE_TITLES["normal"]),
+        "message": advice_content,
+        "advice_content": advice_content,
+        "calories": round(log.total_calories, 2) if log else 0,
+        "tdee": round(user.tdee, 2) if user.tdee else 0,
     }
 
 
