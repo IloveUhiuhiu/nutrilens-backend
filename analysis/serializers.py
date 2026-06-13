@@ -59,6 +59,7 @@ class AdminDailyLogSerializer(serializers.ModelSerializer):
 
 class MealComponentSerializer(serializers.ModelSerializer):
     physical_data_name = serializers.CharField(source="physical_data.vi_name", read_only=True)
+    image_url = serializers.SerializerMethodField(read_only=True)
     mask_path = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
@@ -68,6 +69,7 @@ class MealComponentSerializer(serializers.ModelSerializer):
             "physical_data",
             "physical_data_name",
             "component_name",
+            "image_url",
             "mask_path",
             "volume",
             "calculated_weight",
@@ -77,6 +79,11 @@ class MealComponentSerializer(serializers.ModelSerializer):
             "fat",
         )
         read_only_fields = ("id", "calculated_weight", "calories", "protein", "carbs", "fat")
+
+    def get_image_url(self, obj):
+        if obj.physical_data and obj.physical_data.image_url:
+            return obj.physical_data.image_url
+        return None
 
     def get_mask_path(self, obj):
         request = self.context.get("request")

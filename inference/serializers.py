@@ -110,6 +110,8 @@ class InferenceJobCreateSerializer(serializers.ModelSerializer):
 
 
 class InferenceResultSerializer(serializers.ModelSerializer):
+    components = serializers.SerializerMethodField()
+
     class Meta:
         model = InferenceResult
         fields = (
@@ -124,6 +126,24 @@ class InferenceResultSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = fields
+
+    def get_components(self, obj):
+        from nutrients.models import IngredientPhysicalData
+        enriched = []
+        physical_data_cache = {}
+        ids = [c.get("physical_data_id") for c in (obj.components or []) if c.get("physical_data_id")]
+        if ids:
+            qs = IngredientPhysicalData.objects.filter(id__in=ids).only("id", "vi_name", "image_url")
+            physical_data_cache = {pd.id: pd for pd in qs}
+        for comp in (obj.components or []):
+            comp_copy = dict(comp)
+            pd = physical_data_cache.get(comp_copy.get("physical_data_id"))
+            if pd:
+                comp_copy.setdefault("physical_data_name", pd.vi_name)
+                if not comp_copy.get("image_url") and pd.image_url:
+                    comp_copy["image_url"] = pd.image_url
+            enriched.append(comp_copy)
+        return enriched
 
 
 class InferenceJobSerializer(serializers.ModelSerializer):
