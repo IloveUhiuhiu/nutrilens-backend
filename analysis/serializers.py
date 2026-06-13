@@ -169,6 +169,11 @@ class MealFromInferenceSerializer(serializers.Serializer):
     job_id = serializers.CharField()
     date = serializers.DateField(required=False)
     notes = serializers.CharField(required=False, allow_blank=True)
+    total_calories = serializers.FloatField(required=False, min_value=0)
+    total_protein = serializers.FloatField(required=False, min_value=0)
+    total_carbs = serializers.FloatField(required=False, min_value=0)
+    total_fat = serializers.FloatField(required=False, min_value=0)
+    total_weight = serializers.FloatField(required=False, min_value=0)
 
 
 class MealBarcodeSerializer(serializers.Serializer):

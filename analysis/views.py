@@ -71,12 +71,15 @@ def meal_from_inference(request):
     if not serializer.is_valid():
         return validation_error_response(serializer)
 
+    _override_keys = ("total_calories", "total_protein", "total_carbs", "total_fat", "total_weight")
+    nutrition_overrides = {k: serializer.validated_data[k] for k in _override_keys if k in serializer.validated_data}
     try:
         meal = create_inference_meal(
             request.user,
             serializer.validated_data["job_id"],
             date=serializer.validated_data.get("date"),
             notes=serializer.validated_data.get("notes", ""),
+            nutrition_overrides=nutrition_overrides or None,
         )
     except AnalysisServiceError as exc:
         status_code = status.HTTP_404_NOT_FOUND if exc.field == "job_id" and "not found" in exc.message.lower() else status.HTTP_400_BAD_REQUEST

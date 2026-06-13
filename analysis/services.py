@@ -30,8 +30,8 @@ def create_meal_from_totals(log, **kwargs):
     return meal
 
 
-def create_meal_from_inference(user, job_id, date=None, notes=""):
-    """Chức năng: tạo meal từ job AI. Đầu vào: user, job_id, date, notes. Đầu ra: MealEntry."""
+def create_meal_from_inference(user, job_id, date=None, notes="", nutrition_overrides=None):
+    """Chức năng: tạo meal từ job AI. Đầu vào: user, job_id, date, notes, nutrition_overrides. Đầu ra: MealEntry."""
     job = InferenceJob.objects.filter(id=job_id, user=user).first()
     if not job:
         raise AnalysisServiceError("Inference job not found.", field="job_id")
@@ -42,17 +42,18 @@ def create_meal_from_inference(user, job_id, date=None, notes=""):
 
     log = get_or_create_daily_log(user, date)
     result = job.result
+    overrides = nutrition_overrides or {}
     meal = create_meal_from_totals(
         log,
         source_type="image",
         image_path=job.image_url or (job.image.url if job.image else None),
         inference_job_id=job.id,
         notes=notes,
-        total_calories=result.total_calories,
-        total_protein=result.total_protein,
-        total_carbs=result.total_carbs,
-        total_fat=result.total_fat,
-        total_weight=result.total_weight,
+        total_calories=overrides.get("total_calories", result.total_calories),
+        total_protein=overrides.get("total_protein", result.total_protein),
+        total_carbs=overrides.get("total_carbs", result.total_carbs),
+        total_fat=overrides.get("total_fat", result.total_fat),
+        total_weight=overrides.get("total_weight", result.total_weight),
     )
     create_components_from_inference_result(meal, result.components)
     return meal

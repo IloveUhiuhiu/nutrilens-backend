@@ -176,14 +176,35 @@ class InferenceJobSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class InferenceFeedbackCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = InferenceFeedback
-        fields = ("issue_type", "comment", "corrected_data")
-        extra_kwargs = {
-            "comment": {"required": False},
-            "corrected_data": {"required": False},
-        }
+FEEDBACK_ISSUE_TYPE_CHOICES = [
+    "wrong_component",
+    "wrong_portion",
+    "wrong_food_region",
+]
+
+
+class InferenceFeedbackCreateSerializer(serializers.Serializer):
+    """Chức năng: nhận feedback đa loại lỗi từ mobile. Đầu vào: issue_types, actual_components, notes. Đầu ra: InferenceFeedback."""
+
+    issue_types = serializers.ListField(
+        child=serializers.ChoiceField(choices=FEEDBACK_ISSUE_TYPE_CHOICES),
+        min_length=1,
+    )
+    actual_components = serializers.ListField(
+        child=serializers.CharField(max_length=150, allow_blank=True),
+        required=False,
+        default=list,
+    )
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def create(self, validated_data):
+        return InferenceFeedback.objects.create(
+            job=validated_data["job"],
+            user=validated_data["user"],
+            issue_type=",".join(validated_data["issue_types"]),
+            comment=validated_data.get("notes", ""),
+            corrected_data={"actual_components": validated_data.get("actual_components", [])},
+        )
 
 
 class InferenceFeedbackSerializer(serializers.ModelSerializer):
