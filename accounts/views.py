@@ -9,8 +9,10 @@ from drf_spectacular.utils import (
 )
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from core.permissions import method_perm, require_perm
 
 from core.api import (
     API_EMPTY_RESPONSE,
@@ -380,7 +382,7 @@ def password_reset(request):
     responses={200: PROFILE_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["GET", "PATCH"])
-@permission_classes([IsAuthenticated])
+@permission_classes([method_perm(GET="accounts.view_user", PATCH="accounts.change_user")])
 @handle_api_exceptions
 def profile(request):
     """Chức năng: API xem/cập nhật profile. Đầu vào: GET hoặc PATCH profile. Đầu ra: thông tin profile."""
@@ -413,7 +415,7 @@ def profile(request):
     responses={200: API_EMPTY_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("accounts.change_user")])
 @handle_api_exceptions
 def password_change(request):
     """Chức năng: API đổi mật khẩu đã đăng nhập. Đầu vào: old_password, new_password. Đầu ra: xác nhận hoặc lỗi."""
@@ -442,7 +444,7 @@ def password_change(request):
     ],
 )
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("accounts.view_user")])
 @handle_api_exceptions
 def logout(request):
     """Chức năng: API đăng xuất. Đầu vào: refresh token. Đầu ra: token bị blacklist hoặc lỗi."""
@@ -477,7 +479,7 @@ def logout(request):
     responses={200: ADMIN_ACCOUNT_LIST_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("accounts.view_user")])
 @handle_api_exceptions
 def admin_account_list(request):
     """Chức năng: API admin danh sách tài khoản. Đầu vào: role/search/date/page. Đầu ra: danh sách user phân trang."""
@@ -518,7 +520,7 @@ def admin_account_list(request):
     responses={200: ADMIN_ACCOUNT_DETAIL_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("accounts.view_user")])
 @handle_api_exceptions
 def admin_account_detail(request, id):
     """Chức năng: API admin chi tiết tài khoản. Đầu vào: user id. Đầu ra: profile chi tiết hoặc lỗi."""
@@ -537,7 +539,7 @@ def admin_account_detail(request, id):
     responses={200: ADMIN_ACCOUNT_DETAIL_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("accounts.change_user")])
 @handle_api_exceptions
 def admin_account_status(request, id):
     """Chức năng: API admin khóa/mở tài khoản. Đầu vào: user id, is_active. Đầu ra: user đã cập nhật hoặc lỗi."""
@@ -574,7 +576,7 @@ def admin_account_status(request, id):
     responses={200: API_EMPTY_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("accounts.change_user")])
 @handle_api_exceptions
 def admin_account_reset_password(request, id):
     """Chức năng: API admin reset mật khẩu. Đầu vào: user id, new_password tùy chọn. Đầu ra: xác nhận hoặc lỗi."""
@@ -597,7 +599,7 @@ def admin_account_reset_password(request, id):
     responses={200: ADMIN_ACCOUNT_DETAIL_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("accounts.change_user")])
 @handle_api_exceptions
 def admin_account_role(request, id):
     """Chức năng: API admin đổi vai trò/nhóm quyền. Đầu vào: user id, role/group_ids. Đầu ra: user đã cập nhật."""
@@ -644,7 +646,7 @@ def admin_account_role(request, id):
     responses={200: QUOTA_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["GET", "PUT"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(GET="accounts.view_quotaconfig", PUT="accounts.change_quotaconfig")])
 @handle_api_exceptions
 def admin_quota(request):
     """Chức năng: API admin xem/cập nhật quota guest. Đầu vào: GET hoặc guest_scan_limit. Đầu ra: quota."""
@@ -694,7 +696,7 @@ ADMIN_OTP_LIST_RESPONSE = inline_serializer(
     responses={200: ADMIN_OTP_LIST_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("accounts.view_accountotp")])
 @handle_api_exceptions
 def admin_otp_list(request):
     """Chức năng: API admin danh sách OTP. Đầu vào: search/purpose/is_verified/page. Đầu ra: danh sách AccountOTP."""
@@ -723,7 +725,7 @@ def admin_otp_list(request):
     responses={200: ACTIVITY_LEVEL_LIST_RESPONSE, 201: ACTIVITY_LEVEL_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(GET="accounts.view_activitylevel", POST="accounts.add_activitylevel")])
 @handle_api_exceptions
 def admin_activity_level_list_create(request):
     """Chức năng: API admin list/create mức vận động. Đầu vào: payload nếu POST. Đầu ra: danh sách hoặc ActivityLevel mới."""
@@ -751,7 +753,11 @@ def admin_activity_level_list_create(request):
     responses={200: ACTIVITY_LEVEL_RESPONSE, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(
+    GET="accounts.view_activitylevel",
+    PATCH="accounts.change_activitylevel",
+    DELETE="accounts.delete_activitylevel",
+)])
 @handle_api_exceptions
 def admin_activity_level_detail(request, id):
     """Chức năng: API admin xem/sửa/xóa mức vận động. Đầu vào: id và payload tùy method. Đầu ra: ActivityLevel hoặc xác nhận xóa."""

@@ -5,7 +5,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from core.cloudinary_upload import upload_image_to_cloudinary
 from .models import AccountOTP, ActivityLevel, QuotaConfig, User, WeightHistory
-from .services import get_random_default_avatar_url
+from .services import auto_assign_default_group, get_random_default_avatar_url
 
 
 class ActivityLevelSerializer(serializers.ModelSerializer):
@@ -58,6 +58,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             user.save(update_fields=["avatar_url"])
         WeightHistory.objects.create(user=user, weight=weight)
         user.refresh_tdee(current_weight=weight)
+        auto_assign_default_group(user)
         return user
 
 

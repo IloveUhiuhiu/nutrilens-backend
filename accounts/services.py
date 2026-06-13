@@ -8,6 +8,8 @@ from django.utils import timezone
 from .models import AccountOTP, User
 from .tasks import send_otp_email_task
 
+DEFAULT_USER_GROUP_NAME = "User"
+
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,13 @@ class AccountServiceError(Exception):
         self.message = message
         self.field = field
         super().__init__(message)
+
+
+def auto_assign_default_group(user):
+    """Assign the 'User' group to a newly registered account (no-op if group absent)."""
+    group = Group.objects.filter(name=DEFAULT_USER_GROUP_NAME).first()
+    if group:
+        user.groups.add(group)
 
 
 def generate_otp():

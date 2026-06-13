@@ -2,7 +2,8 @@ from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+
+from core.permissions import method_perm, require_perm
 
 from core.api import (
     API_EMPTY_RESPONSE,
@@ -47,7 +48,7 @@ def user_meal_queryset(user):
 
 @extend_schema(summary="Tra cứu barcode", parameters=[OpenApiParameter("barcode", OpenApiTypes.STR)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("nutrients.view_packagedfood")])
 @handle_api_exceptions
 def barcode_lookup(request, barcode):
     """Chức năng: API tra barcode local trước, thiếu thì gọi OFF. Đầu vào: barcode. Đầu ra: PackagedFood hoặc lỗi."""
@@ -62,7 +63,7 @@ def barcode_lookup(request, barcode):
 
 @extend_schema(summary="Tạo bữa ăn từ kết quả AI", request=MealFromInferenceSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("analysis.add_mealentry")])
 @handle_api_exceptions
 def meal_from_inference(request):
     """Chức năng: API tạo meal từ kết quả AI. Đầu vào: job_id, date, notes. Đầu ra: MealEntry hoặc lỗi."""
@@ -89,7 +90,7 @@ def meal_from_inference(request):
 
 @extend_schema(summary="Tạo bữa ăn từ barcode", request=MealBarcodeSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("analysis.add_mealentry")])
 @handle_api_exceptions
 def meal_from_barcode(request):
     """Chức năng: API tạo meal từ barcode đã tra cứu/local. Đầu vào: barcode, servings, date. Đầu ra: MealEntry."""
@@ -113,7 +114,7 @@ def meal_from_barcode(request):
 
 @extend_schema(summary="Tìm kiếm top 5 món ăn bằng USDA", request=MealSearchSerializer, responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("nutrients.view_food")])
 @handle_api_exceptions
 def meal_search(request):
     """Chức năng: API tìm top 5 món USDA. Đầu vào: query/source_type. Đầu ra: kết quả dùng đơn vị gram."""
@@ -139,7 +140,7 @@ def meal_search(request):
 
 @extend_schema(summary="Tạo bữa ăn từ USDA", request=MealFromUSDASerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("analysis.add_mealentry")])
 @handle_api_exceptions
 def meal_from_usda(request):
     """Chức năng: API tạo meal từ Food USDA. Đầu vào: fdc_id và grams. Đầu ra: MealEntry."""
@@ -163,7 +164,7 @@ def meal_from_usda(request):
 
 @extend_schema(summary="Tạo bữa ăn thủ công", request=ManualMealSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("analysis.add_mealentry")])
 @handle_api_exceptions
 def meal_manual(request):
     """Chức năng: API tạo meal thủ công. Đầu vào: food, components hoặc tổng dinh dưỡng. Đầu ra: MealEntry."""
@@ -177,7 +178,7 @@ def meal_manual(request):
 
 @extend_schema(summary="Danh sách bữa ăn", parameters=[OpenApiParameter("date", OpenApiTypes.DATE), OpenApiParameter("from", OpenApiTypes.DATE), OpenApiParameter("to", OpenApiTypes.DATE), OpenApiParameter("page", OpenApiTypes.INT)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("analysis.view_mealentry")])
 @handle_api_exceptions
 def meal_list(request):
     """Chức năng: API danh sách meal của user. Đầu vào: date/from/to/page. Đầu ra: danh sách MealEntry phân trang."""
@@ -196,7 +197,11 @@ def meal_list(request):
 
 @extend_schema(summary="Chi tiết bữa ăn", request=MealUpdateSerializer, responses={200: OpenApiTypes.OBJECT, 204: API_EMPTY_RESPONSE, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAuthenticated])
+@permission_classes([method_perm(
+    GET="analysis.view_mealentry",
+    PATCH="analysis.change_mealentry",
+    DELETE="analysis.delete_mealentry",
+)])
 @handle_api_exceptions
 def meal_detail(request, id):
     """Chức năng: API xem/sửa/xóa meal. Đầu vào: meal id và payload tùy method. Đầu ra: MealEntry hoặc xác nhận xóa."""
@@ -223,7 +228,7 @@ def meal_detail(request, id):
 
 @extend_schema(summary="Nhật ký dinh dưỡng theo ngày", parameters=[OpenApiParameter("date", OpenApiTypes.DATE)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("analysis.view_dailylog")])
 @handle_api_exceptions
 def daily_log(request):
     """Chức năng: API nhật ký ngày. Đầu vào: date tùy chọn. Đầu ra: DailyLog của user hoặc null."""
@@ -236,7 +241,7 @@ def daily_log(request):
 
 @extend_schema(summary="Nhật ký dinh dưỡng theo khoảng ngày", parameters=[OpenApiParameter("from", OpenApiTypes.DATE, required=True), OpenApiParameter("to", OpenApiTypes.DATE, required=True)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("analysis.view_dailylog")])
 @handle_api_exceptions
 def range_logs(request):
     """Chức năng: API nhật ký theo khoảng ngày. Đầu vào: from và to. Đầu ra: danh sách DailyLog."""
@@ -261,7 +266,7 @@ def range_logs(request):
     responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("analysis.view_mealentry")])
 @handle_api_exceptions
 def admin_meal_list(request):
     """Chức năng: API admin danh sách meal. Đầu vào: search/user_id/source_type/date/page. Đầu ra: danh sách MealEntry phân trang."""
@@ -294,7 +299,7 @@ def admin_meal_list(request):
 
 @extend_schema(summary="Admin chi tiết bữa ăn", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("analysis.view_mealentry")])
 @handle_api_exceptions
 def admin_meal_detail(request, id):
     """Chức năng: API admin chi tiết meal. Đầu vào: meal id. Đầu ra: MealEntry hoặc lỗi 404."""
@@ -316,7 +321,7 @@ def admin_meal_detail(request, id):
     responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES},
 )
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("analysis.view_dailylog")])
 @handle_api_exceptions
 def admin_log_list(request):
     """Chức năng: API admin danh sách log. Đầu vào: search/user_id/date/page. Đầu ra: danh sách DailyLog phân trang."""
@@ -343,7 +348,7 @@ def admin_log_list(request):
 
 @extend_schema(summary="Admin chi tiết nhật ký", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("analysis.view_dailylog")])
 @handle_api_exceptions
 def admin_log_detail(request, id):
     """Chức năng: API admin chi tiết log. Đầu vào: log id. Đầu ra: DailyLog hoặc lỗi 404."""

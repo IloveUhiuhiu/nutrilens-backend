@@ -2,7 +2,6 @@ from django.contrib.auth.models import Group, Permission
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAdminUser
 
 from core.api import (
     api_response,
@@ -11,11 +10,13 @@ from core.api import (
     paginate_queryset,
     validation_error_response,
 )
+from core.permissions import method_perm, require_perm
 from .auth_admin_serializers import GroupDetailSerializer, GroupListSerializer, PermissionSerializer
+from .models import User
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(GET="auth.view_group", POST="auth.add_group")])
 @handle_api_exceptions
 def admin_group_list_create(request):
     """Danh sách và tạo Django Group."""
@@ -41,7 +42,11 @@ def admin_group_list_create(request):
 
 
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(
+    GET="auth.view_group",
+    PATCH="auth.change_group",
+    DELETE="auth.delete_group",
+)])
 @handle_api_exceptions
 def admin_group_detail(request, id):
     """Chi tiết, cập nhật, xóa một Django Group."""
@@ -70,7 +75,7 @@ def admin_group_detail(request, id):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("auth.view_permission")])
 @handle_api_exceptions
 def admin_permission_list(request):
     """Danh sách tất cả Django Permission (dùng để gán vào Group)."""
@@ -88,4 +93,29 @@ def admin_permission_list(request):
     return api_response(
         message="Permissions retrieved successfully.",
         data=paginate_queryset(request, queryset, PermissionSerializer),
+    )
+
+
+@api_view(["GET"])
+@permission_classes([require_perm("accounts.view_user")])
+@handle_api_exceptions
+def admin_user_permissions(request, id):
+    """Xem toàn bộ quyền hiệu lực của một user (từ groups + user_permissions)."""
+    user = User.objects.filter(id=id).prefetch_related("groups__permissions", "user_permissions").first()
+    if not user:
+        return not_found_response("Account not found.")
+
+    groups = list(user.groups.values("id", "name"))
+    all_perms = sorted(user.get_all_permissions())
+
+    return api_response(
+        message="User permissions retrieved successfully.",
+        data={
+            "user_id": user.id,
+            "email": user.email,
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+            "groups": groups,
+            "effective_permissions": all_perms,
+        },
     )

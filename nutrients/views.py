@@ -3,7 +3,9 @@ from django.conf import settings
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny
+
+from core.permissions import method_perm, require_perm
 
 from core.api import (
     API_EMPTY_RESPONSE,
@@ -160,7 +162,7 @@ def admin_detail_update_delete(request, obj, serializer_class, label):
 
 @extend_schema(summary="Admin danh sách và tạo món ăn", request=FoodSerializer, responses={200: OpenApiTypes.OBJECT, 201: FOOD_RESPONSE, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(GET="nutrients.view_food", POST="nutrients.add_food")])
 @handle_api_exceptions
 def admin_food_list_create(request):
     """Chức năng: API admin list/create món ăn. Đầu vào: filter hoặc payload Food. Đầu ra: danh sách hoặc Food mới."""
@@ -169,7 +171,11 @@ def admin_food_list_create(request):
 
 @extend_schema(summary="Admin chi tiết món ăn", request=FoodSerializer, responses={200: FOOD_RESPONSE, 204: API_EMPTY_RESPONSE, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(
+    GET="nutrients.view_food",
+    PATCH="nutrients.change_food",
+    DELETE="nutrients.delete_food",
+)])
 @handle_api_exceptions
 def admin_food_detail(request, id):
     """Chức năng: API admin xem/sửa/xóa món ăn. Đầu vào: food id và payload tùy method. Đầu ra: Food hoặc xác nhận xóa."""
@@ -178,7 +184,10 @@ def admin_food_detail(request, id):
 
 @extend_schema(summary="Admin danh sách và tạo nguyên liệu", request=IngredientPhysicalDataSerializer, responses={200: OpenApiTypes.OBJECT, 201: INGREDIENT_RESPONSE, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(
+    GET="nutrients.view_ingredientphysicaldata",
+    POST="nutrients.add_ingredientphysicaldata",
+)])
 @handle_api_exceptions
 def admin_ingredient_list_create(request):
     """Chức năng: API admin list/create nguyên liệu. Đầu vào: filter hoặc payload Ingredient. Đầu ra: danh sách hoặc Ingredient mới."""
@@ -187,7 +196,11 @@ def admin_ingredient_list_create(request):
 
 @extend_schema(summary="Admin chi tiết nguyên liệu", request=IngredientPhysicalDataSerializer, responses={200: INGREDIENT_RESPONSE, 204: API_EMPTY_RESPONSE, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(
+    GET="nutrients.view_ingredientphysicaldata",
+    PATCH="nutrients.change_ingredientphysicaldata",
+    DELETE="nutrients.delete_ingredientphysicaldata",
+)])
 @handle_api_exceptions
 def admin_ingredient_detail(request, id):
     """Chức năng: API admin xem/sửa/xóa nguyên liệu. Đầu vào: ingredient id và payload tùy method. Đầu ra: Ingredient hoặc xác nhận xóa."""
@@ -196,7 +209,10 @@ def admin_ingredient_detail(request, id):
 
 @extend_schema(summary="Admin danh sách và tạo rule tư vấn", request=HealthAdviceRuleSerializer, responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(
+    GET="nutrients.view_healthadvicerule",
+    POST="nutrients.add_healthadvicerule",
+)])
 @handle_api_exceptions
 def admin_advice_rule_list_create(request):
     """Chức năng: API admin list/create rule tư vấn. Đầu vào: payload rule nếu POST. Đầu ra: danh sách hoặc rule mới."""
@@ -205,7 +221,11 @@ def admin_advice_rule_list_create(request):
 
 @extend_schema(summary="Admin chi tiết rule tư vấn", request=HealthAdviceRuleSerializer, responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(
+    GET="nutrients.view_healthadvicerule",
+    PATCH="nutrients.change_healthadvicerule",
+    DELETE="nutrients.delete_healthadvicerule",
+)])
 @handle_api_exceptions
 def admin_advice_rule_detail(request, id):
     """Chức năng: API admin xem/sửa/xóa rule tư vấn. Đầu vào: rule id và payload tùy method. Đầu ra: rule hoặc xác nhận xóa."""
@@ -214,7 +234,10 @@ def admin_advice_rule_detail(request, id):
 
 @extend_schema(summary="Admin danh sách và tạo packaged food", request=PackagedFoodSerializer, responses={200: OpenApiTypes.OBJECT, 201: PACKAGED_FOOD_RESPONSE, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "POST"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(
+    GET="nutrients.view_packagedfood",
+    POST="nutrients.add_packagedfood",
+)])
 @handle_api_exceptions
 def admin_packaged_food_list_create(request):
     """Chức năng: API admin list/create packaged food. Đầu vào: search hoặc payload. Đầu ra: danh sách hoặc PackagedFood mới."""
@@ -227,7 +250,11 @@ def admin_packaged_food_list_create(request):
 
 @extend_schema(summary="Admin chi tiết packaged food", request=PackagedFoodSerializer, responses={200: PACKAGED_FOOD_RESPONSE, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAdminUser])
+@permission_classes([method_perm(
+    GET="nutrients.view_packagedfood",
+    PATCH="nutrients.change_packagedfood",
+    DELETE="nutrients.delete_packagedfood",
+)])
 @handle_api_exceptions
 def admin_packaged_food_detail(request, id):
     """Chức năng: API admin xem/sửa/xóa packaged food. Đầu vào: packaged food id và payload tùy method. Đầu ra: object hoặc xác nhận xóa."""

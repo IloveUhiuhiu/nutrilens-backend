@@ -1,16 +1,23 @@
 from django.contrib.auth.models import Group, Permission
 from rest_framework import serializers
 
+from .permission_descriptions import PERMISSION_DESCRIPTIONS
+
 
 class PermissionSerializer(serializers.ModelSerializer):
     content_type_label = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
 
     class Meta:
         model = Permission
-        fields = ("id", "name", "codename", "content_type", "content_type_label")
+        fields = ("id", "name", "codename", "content_type", "content_type_label", "description")
 
     def get_content_type_label(self, obj):
         return f"{obj.content_type.app_label}.{obj.content_type.model}"
+
+    def get_description(self, obj):
+        key = f"{obj.content_type.app_label}.{obj.codename}"
+        return PERMISSION_DESCRIPTIONS.get(key, "")
 
 
 class GroupDetailSerializer(serializers.ModelSerializer):

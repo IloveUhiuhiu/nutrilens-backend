@@ -16,9 +16,91 @@ from analysis.services import format_quantity, nutrient_value_from_payload
 from nutrients.clients import ExternalLookupError
 from nutrients.models import HealthAdviceRule, IngredientPhysicalData, PackagedFood
 from nutrients.services import lookup_and_save_barcode, save_food_from_usda_payload, search_usda_foods
-
+from difflib import SequenceMatcher
 from core.cloudinary_upload import CloudinaryUploadError, upload_image_to_cloudinary
+FUZZY_MATCH_THRESHOLD = 0.82
+EMBEDDING_MATCH_THRESHOLD = 0.72
+FUZZY_MATCH_THRESHOLD = 0.82
+EMBEDDING_MATCH_THRESHOLD = 0.72
 
+
+def _similarity(a, b):
+    """Tính độ giống nhau chuỗi bằng fuzzy matching."""
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _find_fuzzy_match(en_name, icon_mapping):
+    """Tìm icon gần đúng bằng fuzzy matching."""
+    best_name = None
+    best_score = 0
+
+    for variant in _name_variants(en_name):
+        for icon_name in icon_mapping:
+            score = _similarity(variant, icon_name)
+            if score > best_score:
+                best_name = icon_name
+                best_score = score
+
+    if best_name and best_score >= FUZZY_MATCH_THRESHOLD:
+        return icon_mapping[best_name], best_score
+
+    return None, best_score
+
+
+def _load_embedding_model():
+    """Load model embedding nếu thư viện khả dụng."""
+    try:
+        from sentence_transformers import SentenceTransformer
+        return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    except Exception:
+        return None
+
+
+def _cosine_similarity(vec_a, vec_b):
+    """Tính cosine similarity cho hai vector embedding."""
+    dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    norm_a = sum(a * a for a in vec_a) ** 0.5
+    norm_b = sum(b * b for b in vec_b) ** 0.5
+    if not norm_a or not norm_b:
+        return 0
+    return dot / (norm_a * norm_b)
+
+
+def build_icon_embeddings(icon_mapping, embedding_model):
+    """Tạo embedding cho danh sách tên icon."""
+    if embedding_model is None:
+        return {}
+
+    icon_names = list(icon_mapping.keys())
+    vectors = embedding_model.encode(icon_names, normalize_embeddings=True)
+
+    return {
+        icon_name: vector
+        for icon_name, vector in zip(icon_names, vectors)
+    }
+
+
+def _find_embedding_match(en_name, icon_mapping, embedding_model, icon_embeddings):
+    """Tìm icon gần nghĩa bằng embedding nếu exact/fuzzy không match."""
+    if embedding_model is None or not icon_embeddings:
+        return None, 0
+
+    query = _normalize_name(en_name)
+    query_vector = embedding_model.encode(query, normalize_embeddings=True)
+
+    best_name = None
+    best_score = 0
+
+    for icon_name, icon_vector in icon_embeddings.items():
+        score = _cosine_similarity(query_vector, icon_vector)
+        if score > best_score:
+            best_name = icon_name
+            best_score = score
+
+    if best_name and best_score >= EMBEDDING_MATCH_THRESHOLD:
+        return icon_mapping[best_name], best_score
+
+    return None, best_score
 
 ADMIN_EMAILS = (
     "dangphuclong2019@gmail.com",
@@ -46,6 +128,7 @@ SEED_TARGETS = (
 ALL_SEED_TARGETS = SEED_TARGETS + (
     "ingredient-images",
     "last-login",
+    "permission",
 )
 
 VIETNAMESE_LAST_NAMES = (
@@ -6885,9 +6968,12 @@ def seed_ingredient_images(icon_dir, stdout=None, style=None):
     updated = 0
     fallback_used = 0
     failed = 0
+    fallback_url_cache = {}
 
     for ingredient in IngredientPhysicalData.objects.all().order_by('fdc_id_ref'):
         matched_file = None
+        is_fallback = False
+        
         for variant in _name_variants(ingredient.en_name):
             if variant in icon_mapping:
                 matched_file = icon_mapping[variant]
@@ -6899,18 +6985,31 @@ def seed_ingredient_images(icon_dir, stdout=None, style=None):
                 if stdout:
                     stdout.write(style.WARNING(f"Không tìm thấy icon và không có fallback: {ingredient.en_name}"))
                 continue
+
             matched_file = random.choice(fallback_files)
             fallback_used += 1
+            is_fallback = True
 
         public_id = re.sub(r'[^a-z0-9-]', '-', ingredient.fdc_id_ref.lower())
 
         try:
-            with open(matched_file, 'rb') as img_file:
-                image_url = upload_image_to_cloudinary(
-                    img_file,
-                    public_id=public_id,
-                    folder='nutrilens/ingredients',
-                )
+            if is_fallback and matched_file.name in fallback_url_cache:
+                image_url = fallback_url_cache[matched_file.name]
+            else:
+                if is_fallback:
+                    public_id = f"fallback-{matched_file.stem}"
+                else:
+                    public_id = re.sub(r'[^a-z0-9-]', '-', ingredient.fdc_id_ref.lower())
+
+                with open(matched_file, 'rb') as img_file:
+                    image_url = upload_image_to_cloudinary(
+                        img_file,
+                        public_id=public_id,
+                        folder='nutrilens/ingredients',
+                    )
+
+                if is_fallback:
+                    fallback_url_cache[matched_file.name] = image_url
             ingredient.image_url = image_url
             ingredient.save(update_fields=['image_url'])
             updated += 1
@@ -6961,6 +7060,150 @@ def ensure_default_activity_level():
     return activity_level
 
 
+# ---------------------------------------------------------------------------
+# RBAC — default groups and their permission codenames
+# ---------------------------------------------------------------------------
+
+_USER_PERMISSIONS = (
+    # accounts
+    "accounts.view_user",
+    "accounts.change_user",
+    "accounts.view_activitylevel",
+    "accounts.view_weighthistory",
+    "accounts.add_weighthistory",
+    # nutrients (read-only for regular users)
+    "nutrients.view_food",
+    "nutrients.view_packagedfood",
+    "nutrients.view_ingredientphysicaldata",
+    "nutrients.view_healthadvicerule",
+    # analysis
+    "analysis.view_dailylog",
+    "analysis.add_mealentry",
+    "analysis.view_mealentry",
+    "analysis.change_mealentry",
+    "analysis.delete_mealentry",
+    "analysis.view_mealcomponent",
+    # inference
+    "inference.add_inferencejob",
+    "inference.view_inferencejob",
+    "inference.view_inferenceresult",
+    "inference.add_inferencefeedback",
+)
+
+_ADMIN_PERMISSIONS = _USER_PERMISSIONS + (
+    # accounts — admin management
+    "accounts.delete_user",
+    "accounts.view_accountotp",
+    "accounts.view_quotaconfig",
+    "accounts.change_quotaconfig",
+    "accounts.add_activitylevel",
+    "accounts.change_activitylevel",
+    "accounts.delete_activitylevel",
+    # auth — group/permission management
+    "auth.view_group",
+    "auth.add_group",
+    "auth.change_group",
+    "auth.delete_group",
+    "auth.view_permission",
+    # nutrients — full CRUD
+    "nutrients.add_food",
+    "nutrients.change_food",
+    "nutrients.delete_food",
+    "nutrients.add_ingredientphysicaldata",
+    "nutrients.change_ingredientphysicaldata",
+    "nutrients.delete_ingredientphysicaldata",
+    "nutrients.add_healthadvicerule",
+    "nutrients.change_healthadvicerule",
+    "nutrients.delete_healthadvicerule",
+    "nutrients.add_packagedfood",
+    "nutrients.change_packagedfood",
+    "nutrients.delete_packagedfood",
+    # analysis — admin read
+    "analysis.view_dailylog",
+    # inference — admin read + feedback management
+    "inference.view_inferencefeedback",
+    "inference.change_inferencefeedback",
+)
+
+
+def seed_groups_and_permissions(stdout=None, style=None):
+    """Create/update the Admin and User groups and attach their permissions.
+
+    Idempotent: safe to run multiple times; never duplicates groups or permissions.
+    Returns a dict with counts of groups created/updated.
+    """
+    from django.contrib.auth.models import Group, Permission
+
+    def _get_perms(codename_list):
+        perms = []
+        missing = []
+        for dotted in codename_list:
+            app_label, codename = dotted.split(".", 1)
+            perm = Permission.objects.filter(
+                codename=codename,
+                content_type__app_label=app_label,
+            ).first()
+            if perm:
+                perms.append(perm)
+            else:
+                missing.append(dotted)
+        return perms, missing
+
+    results = {"created": 0, "updated": 0, "missing_perms": []}
+
+    group_specs = (
+        ("User", _USER_PERMISSIONS),
+        ("Admin", _ADMIN_PERMISSIONS),
+    )
+
+    for group_name, codenames in group_specs:
+        perms, missing = _get_perms(codenames)
+        results["missing_perms"].extend(missing)
+
+        group, created = Group.objects.get_or_create(name=group_name)
+        group.permissions.set(perms)
+
+        if created:
+            results["created"] += 1
+            if stdout:
+                stdout.write(style.SUCCESS(f"Group created: {group_name} ({len(perms)} permissions)"))
+        else:
+            results["updated"] += 1
+            if stdout:
+                stdout.write(style.SUCCESS(f"Group updated: {group_name} ({len(perms)} permissions)"))
+
+    if results["missing_perms"] and stdout:
+        stdout.write(style.WARNING(
+            f"Permissions not yet in DB (run migrations first): {results['missing_perms']}"
+        ))
+
+    # Assign existing users to the appropriate group based on their current role.
+    # Uses add() — idempotent, never duplicates.
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    admin_group = Group.objects.filter(name="Admin").first()
+    user_group = Group.objects.filter(name="User").first()
+
+    assigned_admin = assigned_user = 0
+    if admin_group:
+        admin_qs = User.objects.filter(is_staff=True)
+        for u in admin_qs:
+            u.groups.add(admin_group)
+        assigned_admin = admin_qs.count()
+    if user_group:
+        regular_qs = User.objects.filter(is_staff=False, is_superuser=False)
+        for u in regular_qs:
+            u.groups.add(user_group)
+        assigned_user = regular_qs.count()
+
+    if stdout:
+        stdout.write(style.SUCCESS(
+            f"Group membership synced: {assigned_admin} admin(s), {assigned_user} user(s)"
+        ))
+
+    return results
+
+
 class Command(BaseCommand):
     help = "Seed NutriLens admin accounts and 100 normal Vietnamese users."
 
@@ -6988,10 +7231,26 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         User = get_user_model()
-        targets = selected_seed_targets(options)
+        only_flags = set(options.get("only") or [])
+        skip_flags = set(options.get("skip") or [])
+
+        # "permission" is a virtual target — it drives seed_groups_and_permissions().
+        # Run it when: no --only flag is given (full seed), OR "permission" is explicitly listed.
+        run_permissions = (not only_flags or "permission" in only_flags) and "permission" not in skip_flags
+
+        # Build the standard data targets, excluding the virtual "permission" target.
+        targets = selected_seed_targets(options) - {"permission"}
 
         self.stdout.write(self.style.WARNING("Starting NutriLens seed data..."))
         self.stdout.write(self.style.WARNING(f"Selected seed targets: {', '.join(sorted(targets)) or 'none'}"))
+        if run_permissions:
+            self.stdout.write(self.style.WARNING("Permission target: enabled"))
+
+        if run_permissions:
+            group_results = seed_groups_and_permissions(self.stdout, self.style)
+            self.stdout.write(self.style.SUCCESS(
+                f"RBAC groups: {group_results['created']} created, {group_results['updated']} updated"
+            ))
 
         activity_levels = []
         quota_configs = []
@@ -7073,6 +7332,12 @@ class Command(BaseCommand):
                     ]
                 )
 
+                # Ensure admin accounts are in the Admin group.
+                from django.contrib.auth.models import Group as DjangoGroup
+                admin_group = DjangoGroup.objects.filter(name="Admin").first()
+                if admin_group:
+                    admin.groups.add(admin_group)
+
                 action = "created" if created else "updated"
                 self.stdout.write(self.style.SUCCESS(f"Admin {action}: {email}"))
 
@@ -7142,6 +7407,12 @@ class Command(BaseCommand):
 
                 WeightHistory.objects.get_or_create(user=user, weight=weight)
                 user.refresh_tdee(current_weight=weight)
+
+                # Assign to the "User" RBAC group.
+                from django.contrib.auth.models import Group as DjangoGroup
+                user_group = DjangoGroup.objects.filter(name="User").first()
+                if user_group:
+                    user.groups.add(user_group)
 
                 action = "created" if created else "updated"
                 self.stdout.write(self.style.SUCCESS(f"User {index:02d} {action}: {user.email}"))

@@ -3,7 +3,8 @@ from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+
+from core.permissions import method_perm, require_perm
 
 from core.api import DEFAULT_ERROR_RESPONSES, api_response, handle_api_exceptions, not_found_response, paginate_queryset, validation_error_response
 from .cloudinary_upload import CloudinaryUploadError, upload_image_to_cloudinary
@@ -21,7 +22,7 @@ from .tasks import process_inference_job_task
 
 @extend_schema(summary="Tạo job phân tích ảnh", request=InferenceJobCreateSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("inference.add_inferencejob")])
 @handle_api_exceptions
 def image_inference(request):
     """Chức năng: API tạo job phân tích ảnh. Đầu vào: image multipart hoặc URL và camera_metadata. Đầu ra: InferenceJob pending."""
@@ -64,7 +65,7 @@ def image_inference(request):
 
 @extend_schema(summary="Chi tiết job phân tích", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("inference.view_inferencejob")])
 @handle_api_exceptions
 def job_detail(request, id):
     """Chức năng: API xem trạng thái job. Đầu vào: job id. Đầu ra: InferenceJob hoặc lỗi 404."""
@@ -76,7 +77,7 @@ def job_detail(request, id):
 
 @extend_schema(summary="Kết quả job phân tích", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("inference.view_inferenceresult")])
 @handle_api_exceptions
 def job_result(request, id):
     """Chức năng: API lấy kết quả AI. Đầu vào: job id. Đầu ra: InferenceResult hoặc lỗi 404."""
@@ -97,7 +98,7 @@ def job_result(request, id):
 
 @extend_schema(summary="Gửi feedback kết quả AI", request=InferenceFeedbackCreateSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([require_perm("inference.add_inferencefeedback")])
 @handle_api_exceptions
 def job_feedback(request, id):
     """Chức năng: API gửi feedback kết quả AI. Đầu vào: job id và payload feedback. Đầu ra: InferenceFeedback."""
@@ -113,7 +114,7 @@ def job_feedback(request, id):
 
 @extend_schema(summary="Admin danh sách job AI", parameters=[OpenApiParameter("status", OpenApiTypes.STR), OpenApiParameter("search", OpenApiTypes.STR)], responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("inference.view_inferencejob")])
 @handle_api_exceptions
 def admin_job_list(request):
     """Chức năng: API admin danh sách job AI. Đầu vào: status/search/page. Đầu ra: danh sách InferenceJob."""
@@ -129,7 +130,7 @@ def admin_job_list(request):
 
 @extend_schema(summary="Admin chi tiết job AI", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("inference.view_inferencejob")])
 @handle_api_exceptions
 def admin_job_detail(request, id):
     """Chức năng: API admin chi tiết job AI. Đầu vào: job id. Đầu ra: InferenceJob hoặc lỗi 404."""
@@ -141,7 +142,7 @@ def admin_job_detail(request, id):
 
 @extend_schema(summary="Admin metrics inference", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("inference.view_inferencejob")])
 @handle_api_exceptions
 def admin_metrics(request):
     """Chức năng: API admin metrics inference. Đầu vào: request admin. Đầu ra: tổng job, trạng thái, latency, feedback."""
@@ -161,7 +162,7 @@ def admin_metrics(request):
 
 @extend_schema(summary="Admin danh sách feedback AI", responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("inference.view_inferencefeedback")])
 @handle_api_exceptions
 def admin_feedback_list(request):
     """Chức năng: API admin danh sách feedback AI. Đầu vào: page. Đầu ra: danh sách InferenceFeedback."""
@@ -171,7 +172,7 @@ def admin_feedback_list(request):
 
 @extend_schema(summary="Admin cập nhật feedback AI", request=InferenceFeedbackReviewSerializer, responses={200: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["PATCH"])
-@permission_classes([IsAdminUser])
+@permission_classes([require_perm("inference.change_inferencefeedback")])
 @handle_api_exceptions
 def admin_feedback_review(request, id):
     """Chức năng: API admin cập nhật feedback AI. Đầu vào: feedback id và status. Đầu ra: InferenceFeedback."""
