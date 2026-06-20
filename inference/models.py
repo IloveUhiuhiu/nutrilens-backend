@@ -18,6 +18,11 @@ class InferenceJob(models.Model):
     depth_map = models.FileField(upload_to='inference/depth_maps/', blank=True)
     camera_metadata = models.JSONField(default=dict, blank=True)
     depth_metadata = models.JSONField(default=dict, blank=True)
+    # Client-supplied idempotency token: a repeated POST with the same key
+    # returns the original job instead of creating a duplicate.
+    idempotency_key = models.CharField(max_length=64, blank=True, db_index=True)
+    # SHA-256 of the uploaded image bytes, used to dedupe identical re-submissions.
+    image_sha256 = models.CharField(max_length=64, blank=True, db_index=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     model_version = models.CharField(max_length=100, blank=True)
     latency_ms = models.PositiveIntegerField(default=0)
@@ -25,6 +30,15 @@ class InferenceJob(models.Model):
     raw_output = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "idempotency_key"],
+                condition=~models.Q(idempotency_key=""),
+                name="uniq_user_idempotency_key",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         """Chức năng: lưu inference job và sinh id. Đầu vào: args/kwargs save. Đầu ra: InferenceJob được lưu."""

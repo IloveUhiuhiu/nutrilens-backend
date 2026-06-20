@@ -1,8 +1,12 @@
 import json
 from urllib.parse import urlsplit
 
+from PIL import Image
 from rest_framework import serializers
 from .models import InferenceFeedback, InferenceJob, InferenceResult
+
+
+MAX_UPLOAD_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 class ImageOrUrlField(serializers.Field):
@@ -11,6 +15,21 @@ class ImageOrUrlField(serializers.Field):
             content_type = getattr(value, "content_type", "")
             if content_type and not content_type.startswith("image/"):
                 raise serializers.ValidationError("Uploaded file must be an image.")
+            size = getattr(value, "size", None)
+            if size is not None and size > MAX_UPLOAD_IMAGE_SIZE:
+                raise serializers.ValidationError("Uploaded image is too large (max 10MB).")
+            # Verify the bytes are a real, decodable image — defends against a
+            # spoofed content-type header on a non-image payload.
+            try:
+                value.seek(0)
+                Image.open(value).verify()
+            except Exception as exc:
+                raise serializers.ValidationError("Uploaded file is not a valid image.") from exc
+            finally:
+                try:
+                    value.seek(0)
+                except (AttributeError, OSError):
+                    pass
             return value
 
         if isinstance(value, str):
@@ -30,10 +49,21 @@ class ImageOrUrlField(serializers.Field):
 class InferenceJobCreateSerializer(serializers.ModelSerializer):
     image = ImageOrUrlField(write_only=True)
     camera_metadata = serializers.JSONField()
+    # Optional dense depth map (ARCore Depth API / ARKit sceneDepth on devices
+    # that actually have it — ToF/LiDAR or motion-stereo). depth_metadata
+    # carries how to decode it (depth_unit, file_extension); both are absent
+    # for devices/captures with no depth map, which fall back to AI-estimated
+    # depth on the server.
+    depth_map = serializers.FileField(write_only=True, required=False, allow_null=True)
+    depth_metadata = serializers.JSONField(required=False)
 
     class Meta:
         model = InferenceJob
-        fields = ("image", "camera_metadata")
+        fields = ("image", "camera_metadata", "depth_map", "depth_metadata")
+
+    def validate_depth_metadata(self, value):
+        """Chức năng: parse depth_metadata multipart (JSON string hoặc dict). Đầu vào: value. Đầu ra: dict."""
+        return self._parse_json_object(value, "depth_metadata")
 
     def validate_camera_metadata(self, value):
         """Chức năng: kiểm tra metadata camera. Đầu vào: dict hoặc JSON string. Đầu ra: dict hợp lệ."""
@@ -69,6 +99,14 @@ class InferenceJobCreateSerializer(serializers.ModelSerializer):
                 "cx": metadata.get("cx"),
                 "cy": metadata.get("cy"),
             }
+
+        # AR captures (ARCore/ARKit) provide an absolute camera-to-food distance
+        # in cm; feed it into the distance/height fields the volume estimator
+        # expects so absolute depth is actually used.
+        distance = self._number_value(metadata.get("camera_to_object_distance"))
+        if distance is not None and metadata.get("has_absolute_depth"):
+            metadata.setdefault("distance_cm", distance)
+            metadata.setdefault("camera_height_cm", distance)
 
         return metadata
 

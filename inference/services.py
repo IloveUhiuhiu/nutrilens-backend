@@ -26,6 +26,14 @@ class AIServerError(Exception):
         super().__init__(message)
 
 
+class TransientAIError(AIServerError):
+    """Lỗi tạm thời (timeout, 5xx, mất kết nối) — AN TOÀN để retry."""
+
+
+class PermanentAIError(AIServerError):
+    """Lỗi cố định (4xx, payload sai) — retry chỉ tốn AI compute, KHÔNG nên retry."""
+
+
 def call_ai_analysis_server(job):
     """Chức năng: gửi ảnh, metadata camera và depth map tới AI server. Đầu vào: InferenceJob. Đầu ra: JSON payload từ AI server."""
     if not settings.AI_SERVER_URL:
@@ -40,9 +48,16 @@ def call_ai_analysis_server(job):
     if settings.AI_SERVER_API_KEY:
         headers["Authorization"] = f"Bearer {settings.AI_SERVER_API_KEY}"
 
+    # The AI server reads depth-decode hints from camera_metadata["depth"]
+    # (depth_unit/file_extension) — nest the job's depth_metadata there rather
+    # than sending it as a separate, unread field.
+    camera_metadata = dict(job.camera_metadata or {})
+    if job.depth_map and job.depth_metadata:
+        camera_metadata["depth"] = job.depth_metadata
+
     data = {
         "job_id": job.id,
-        "camera_metadata": json.dumps(job.camera_metadata or {}),
+        "camera_metadata": json.dumps(camera_metadata),
     }
 
     try:
@@ -63,7 +78,7 @@ def call_ai_analysis_server(job):
         response.raise_for_status()
         return response.json()
     except requests.Timeout as exc:
-        raise AIServerError(
+        raise TransientAIError(
             "AI server request timed out.",
             code="timeout",
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -71,22 +86,30 @@ def call_ai_analysis_server(job):
     except requests.HTTPError as exc:
         response = exc.response
         detail = ""
+        upstream = response.status_code if response is not None else None
         if response is not None:
             detail = _format_ai_error_detail(response)
-        raise AIServerError(
-            f"AI server returned HTTP {response.status_code if response is not None else 'error'}.",
+        # 4xx from the AI server is a permanent problem with this request
+        # (bad image/metadata); retrying just wastes AI compute. 5xx / no
+        # response is transient and worth a bounded retry.
+        error_cls = (
+            PermanentAIError if upstream is not None and 400 <= upstream < 500
+            else TransientAIError
+        )
+        raise error_cls(
+            f"AI server returned HTTP {upstream or 'error'}.",
             code="bad_gateway",
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=detail,
         ) from exc
     except requests.RequestException as exc:
-        raise AIServerError(
+        raise TransientAIError(
             "AI server is unavailable.",
             code="unavailable",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         ) from exc
     except ValueError as exc:
-        raise AIServerError(
+        raise PermanentAIError(
             "AI server returned invalid JSON.",
             code="invalid_json",
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -100,13 +123,13 @@ def _open_job_image(job, stack):
             response = requests.get(job.image_url, timeout=settings.AI_SERVER_TIMEOUT)
             response.raise_for_status()
         except requests.Timeout as exc:
-            raise AIServerError(
+            raise TransientAIError(
                 "Image URL download timed out.",
                 code="image_url_timeout",
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             ) from exc
         except requests.RequestException as exc:
-            raise AIServerError(
+            raise TransientAIError(
                 "Could not download image URL.",
                 code="image_url_unavailable",
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -114,13 +137,13 @@ def _open_job_image(job, stack):
 
         content_type = response.headers.get("content-type", "").split(";")[0].lower()
         if content_type and not content_type.startswith("image/"):
-            raise AIServerError(
+            raise PermanentAIError(
                 "Image URL must point to an image.",
                 code="invalid_image_url_content_type",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
         if len(response.content) > MAX_REMOTE_IMAGE_SIZE:
-            raise AIServerError(
+            raise PermanentAIError(
                 "Image URL file is too large.",
                 code="image_url_too_large",
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -136,7 +159,7 @@ def _open_job_image(job, stack):
     if job.image:
         return job.image.name, stack.enter_context(job.image.open("rb"))
 
-    raise AIServerError(
+    raise PermanentAIError(
         "Inference job image URL is missing.",
         code="missing_image_url",
         status_code=status.HTTP_400_BAD_REQUEST,

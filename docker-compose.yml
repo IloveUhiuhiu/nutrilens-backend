@@ -13,7 +13,20 @@ services:
   celery:
     build: .
     container_name: nutrilens-backend-celery
-    command: celery -A core worker --loglevel=info
+    # Lightweight default queue (emails, misc tasks).
+    command: celery -A core worker --loglevel=info -Q default --concurrency=4
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  celery-ai:
+    build: .
+    container_name: nutrilens-backend-celery-ai
+    # Dedicated AI pipeline queue; low concurrency bounds concurrent load on the
+    # AI server.
+    command: celery -A core worker --loglevel=info -Q ai --concurrency=2
     env_file:
       - .env
     depends_on:

@@ -69,6 +69,20 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'EXCEPTION_HANDLER': 'core.exceptions.api_exception_handler',
+    # Rates consumed by per-view throttles (e.g. InferenceCreateThrottle).
+    # Applied only on views that opt in via @throttle_classes.
+    'DEFAULT_THROTTLE_RATES': {
+        'inference_create': os.getenv('THROTTLE_INFERENCE_CREATE', '20/min'),
+    },
+}
+
+# Shared cache (Redis) — backs DRF throttling so limits are enforced across all
+# gunicorn workers / replicas instead of per-process.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': os.getenv('REDIS_CACHE_URL', 'redis://localhost:6379/1'),
+    }
 }
 
 from datetime import timedelta
@@ -213,6 +227,20 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:63
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
+
+# Reliability: a task is acked only after it finishes (acks_late), and is
+# requeued if its worker dies mid-run — so crashes don't silently drop jobs.
+# The idempotency guard in process_inference_job_task makes redelivery safe.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+# Fair dispatch: don't let one worker prefetch a backlog of long AI tasks.
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# Isolate the expensive AI pipeline on its own queue so it cannot starve
+# lightweight tasks (e.g. emails).
+CELERY_TASK_DEFAULT_QUEUE = "default"
+CELERY_TASK_ROUTES = {
+    "inference.tasks.process_inference_job_task": {"queue": "ai"},
+}
 
 # --- EXTERNAL SERVICES ---
 EXTERNAL_API_TIMEOUT = float(os.getenv("EXTERNAL_API_TIMEOUT", "5"))

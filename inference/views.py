@@ -1,13 +1,16 @@
+import hashlib
+from datetime import timedelta
+
+from django.db import IntegrityError
 from django.db.models import Avg, Count, Q
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 
 from core.permissions import method_perm, require_perm
 
 from core.api import DEFAULT_ERROR_RESPONSES, api_response, handle_api_exceptions, not_found_response, paginate_queryset, validation_error_response
-from .cloudinary_upload import CloudinaryUploadError, upload_image_to_cloudinary
 from .models import InferenceFeedback, InferenceJob, InferenceResult
 from .serializers import (
     InferenceFeedbackCreateSerializer,
@@ -18,37 +21,96 @@ from .serializers import (
     InferenceResultSerializer,
 )
 from .tasks import process_inference_job_task
+from .throttling import InferenceCreateThrottle
+
+
+# Window within which an identical image (same SHA-256) from the same user is
+# treated as a duplicate submission rather than a new analysis.
+IMAGE_DEDUP_WINDOW = timedelta(minutes=10)
+
+
+def _hash_uploaded_image(uploaded):
+    """Chức năng: tính SHA-256 của ảnh upload để chống trùng. Đầu vào: file upload hoặc None. Đầu ra: hex digest hoặc chuỗi rỗng."""
+    if uploaded is None:
+        return ""
+    hasher = hashlib.sha256()
+    for chunk in uploaded.chunks():
+        hasher.update(chunk)
+    try:
+        uploaded.seek(0)
+    except (AttributeError, OSError):
+        pass
+    return hasher.hexdigest()
 
 
 @extend_schema(summary="Tạo job phân tích ảnh", request=InferenceJobCreateSerializer, responses={201: OpenApiTypes.OBJECT, **DEFAULT_ERROR_RESPONSES})
 @api_view(["POST"])
 @permission_classes([require_perm("inference.add_inferencejob")])
+@throttle_classes([InferenceCreateThrottle])
 @handle_api_exceptions
 def image_inference(request):
     """Chức năng: API tạo job phân tích ảnh. Đầu vào: image multipart hoặc URL và camera_metadata. Đầu ra: InferenceJob pending."""
+    idempotency_key = (request.headers.get("Idempotency-Key") or "").strip()[:64]
+
+    # Idempotency: a repeated request with the same client key returns the
+    # original job instead of starting another AI pipeline.
+    if idempotency_key:
+        existing = InferenceJob.objects.filter(
+            user=request.user, idempotency_key=idempotency_key
+        ).first()
+        if existing:
+            return api_response(
+                "Inference job already exists.",
+                data=InferenceJobSerializer(existing).data,
+            )
+
     serializer = InferenceJobCreateSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
-    job = serializer.save(user=request.user, status="pending")
-    if job.image and not job.image_url:
-        try:
-            with job.image.open("rb") as image_file:
-                job.image_url = upload_image_to_cloudinary(
-                    image_file,
-                    public_id=f"{job.id}/original",
-                )
-            job.save(update_fields=["image_url", "updated_at"])
-        except CloudinaryUploadError as exc:
-            job.status = "failed"
-            job.error_message = exc.public_message
-            if exc.detail:
-                job.error_message = f"{job.error_message} Detail: {exc.detail}"
-            job.save(update_fields=["status", "error_message", "updated_at"])
-            return api_response(
-                exc.public_message,
-                status_code=exc.status_code,
-                errors={"cloudinary": [exc.detail or exc.public_message]},
+
+    # Content-based dedup: identical image bytes from the same user within the
+    # dedup window return the existing (non-failed) job.
+    image_sha256 = _hash_uploaded_image(request.FILES.get("image"))
+    if image_sha256:
+        recent = (
+            InferenceJob.objects.filter(
+                user=request.user,
+                image_sha256=image_sha256,
+                created_at__gte=timezone.now() - IMAGE_DEDUP_WINDOW,
             )
+            .exclude(status="failed")
+            .order_by("-created_at")
+            .first()
+        )
+        if recent:
+            return api_response(
+                "Duplicate image detected; returning the existing job.",
+                data=InferenceJobSerializer(recent).data,
+            )
+
+    try:
+        job = serializer.save(
+            user=request.user,
+            status="pending",
+            idempotency_key=idempotency_key,
+            image_sha256=image_sha256,
+        )
+    except IntegrityError:
+        # Lost the race on the unique (user, idempotency_key) constraint —
+        # another concurrent request created it first.
+        existing = InferenceJob.objects.filter(
+            user=request.user, idempotency_key=idempotency_key
+        ).first()
+        if existing:
+            return api_response(
+                "Inference job already exists.",
+                data=InferenceJobSerializer(existing).data,
+            )
+        raise
+
+    # Cloudinary upload runs inside the task (off the request path) so the
+    # request returns immediately and a client timeout/retry cannot trigger a
+    # duplicate synchronous upload.
     try:
         process_inference_job_task.delay(job.id)
     except Exception as exc:
