@@ -38,6 +38,7 @@ from .services import (
     create_meal_from_barcode as create_barcode_meal,
     create_meal_from_inference as create_inference_meal,
     create_meal_from_usda as create_usda_meal,
+    recalculate_meal_quantity,
 )
 
 
@@ -222,7 +223,11 @@ def meal_detail(request, id):
     serializer = MealUpdateSerializer(data=request.data)
     if not serializer.is_valid():
         return validation_error_response(serializer)
-    for field, value in serializer.validated_data.items():
+    validated_data = dict(serializer.validated_data)
+    serving_amount = validated_data.pop("serving_amount", None)
+    if serving_amount is not None:
+        recalculate_meal_quantity(meal, serving_amount)
+    for field, value in validated_data.items():
         setattr(meal, field, value)
     meal.save()
     refresh_daily_log(meal.log)

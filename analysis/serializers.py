@@ -216,6 +216,7 @@ class ManualMealSerializer(serializers.Serializer):
 
 class MealUpdateSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True)
+    serving_amount = serializers.FloatField(required=False, min_value=0.01)
     total_calories = serializers.FloatField(required=False, min_value=0)
     total_protein = serializers.FloatField(required=False, min_value=0)
     total_carbs = serializers.FloatField(required=False, min_value=0)

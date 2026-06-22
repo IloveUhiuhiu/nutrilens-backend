@@ -150,6 +150,32 @@ def create_meal_from_usda(user, fdc_id, grams, date=None, source_type="text", se
     )
 
 
+def recalculate_meal_quantity(meal, serving_amount):
+    """Chức năng: tính lại dinh dưỡng khi đổi số lượng/khẩu phần. Đầu vào: meal và serving_amount mới. Đầu ra: True nếu đã tính lại, False nếu nguồn không hỗ trợ."""
+    if meal.source_type == "barcode" and meal.packaged_food:
+        packaged_food = meal.packaged_food
+        meal.serving_amount = serving_amount
+        meal.total_calories = packaged_food.cal_per_serving * serving_amount
+        meal.total_protein = packaged_food.protein_per_serving * serving_amount
+        meal.total_carbs = packaged_food.carb_per_serving * serving_amount
+        meal.total_fat = packaged_food.fat_per_serving * serving_amount
+        meal.total_weight = packaged_food.serving_size * serving_amount
+        return True
+
+    if meal.source_type in ("text", "voice") and meal.food:
+        payload = meal.food.raw_payload or {}
+        scale = serving_amount / 100
+        meal.serving_amount = serving_amount
+        meal.total_calories = nutrient_value_from_payload(payload, "Energy") * scale
+        meal.total_protein = nutrient_value_from_payload(payload, "Protein") * scale
+        meal.total_carbs = nutrient_value_from_payload(payload, "Carbohydrate, by difference") * scale
+        meal.total_fat = nutrient_value_from_payload(payload, "Total lipid (fat)") * scale
+        meal.total_weight = serving_amount
+        return True
+
+    return False
+
+
 def create_manual_meal(user, data):
     """Chức năng: tạo meal thủ công. Đầu vào: user và validated data. Đầu ra: MealEntry."""
     log = get_or_create_daily_log(user, data.get("date"))
