@@ -6,6 +6,13 @@ services:
       - .env
     ports:
       - "8000:8000"
+    volumes:
+      # Images saved here by the request handler must be visible to the
+      # celery/celery-ai containers below — without a shared volume each
+      # container has its own local /app/media, so a worker trying to open
+      # an image saved by the web process gets FileNotFoundError and the
+      # job never reaches the AI server call.
+      - media_data:/app/media
     depends_on:
       - redis
     restart: unless-stopped
@@ -17,6 +24,8 @@ services:
     command: celery -A core worker --loglevel=info -Q default --concurrency=4
     env_file:
       - .env
+    volumes:
+      - media_data:/app/media
     depends_on:
       - redis
     restart: unless-stopped
@@ -29,6 +38,8 @@ services:
     command: celery -A core worker --loglevel=info -Q ai --concurrency=2
     env_file:
       - .env
+    volumes:
+      - media_data:/app/media
     depends_on:
       - redis
     restart: unless-stopped
@@ -37,3 +48,6 @@ services:
     image: redis:7-alpine
     container_name: nutrilens-backend-redis
     restart: unless-stopped
+
+volumes:
+  media_data:

@@ -71,6 +71,15 @@ def process_inference_job_task(self, job_id):
                 job.error_message = f"{job.error_message} Detail: {exc.detail}"
             job.save(update_fields=["status", "error_message", "updated_at"])
             return job.id  # permanent for this job; not retried
+        except Exception as exc:
+            # Anything other than CloudinaryUploadError (e.g. the image file
+            # isn't visible on this worker's filesystem) must still mark the
+            # job failed — otherwise it's stuck at "running" forever with no
+            # error recorded, and the AI server is never called.
+            job.status = "failed"
+            job.error_message = f"Could not read or upload job image: {exc}"
+            job.save(update_fields=["status", "error_message", "updated_at"])
+            return job.id
 
     try:
         payload = call_ai_analysis_server(job)
