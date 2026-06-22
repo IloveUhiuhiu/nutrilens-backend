@@ -7,6 +7,13 @@ class InferenceJob(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('running', 'Running'),
+        # A transient AI-call failure (timeout/5xx/network) that Celery's
+        # autoretry will retry shortly — distinct from "running" so the
+        # claim guard in process_inference_job_task doesn't treat the next
+        # attempt as a duplicate concurrent worker, and distinct from
+        # "failed" so polling clients don't mistake an in-progress retry for
+        # a final failure.
+        ('retrying', 'Retrying'),
         ('succeeded', 'Succeeded'),
         ('failed', 'Failed'),
     ]
@@ -27,6 +34,11 @@ class InferenceJob(models.Model):
     model_version = models.CharField(max_length=100, blank=True)
     latency_ms = models.PositiveIntegerField(default=0)
     error_message = models.TextField(blank=True)
+    # Mã lỗi nghiệp vụ cụ thể từ AI server (vd. no_food_detected,
+    # no_ingredients_identified...) hoặc mã lỗi tầng backend (vd. timeout,
+    # bad_gateway) khi gọi AI server thất bại. Cho phép mobile/FE hiển thị
+    # thông báo cụ thể theo loại lỗi thay vì chỉ một message chung.
+    error_code = models.CharField(max_length=50, blank=True)
     raw_output = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

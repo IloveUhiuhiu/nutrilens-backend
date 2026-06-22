@@ -249,7 +249,7 @@ INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
 AI_SERVER_URL = os.getenv("AI_SERVER_URL", "").rstrip("/")
 AI_SERVER_ANALYZE_PATH = os.getenv("AI_SERVER_ANALYZE_PATH", "/analyze")
 AI_SERVER_API_KEY = os.getenv("AI_SERVER_API_KEY", "")
-AI_SERVER_TIMEOUT = float(os.getenv("AI_SERVER_TIMEOUT", "30"))
+AI_SERVER_TIMEOUT = float(os.getenv("AI_SERVER_TIMEOUT", "60"))
 
 CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "")
 CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "")

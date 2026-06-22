@@ -16,13 +16,28 @@ MAX_REMOTE_IMAGE_SIZE = 10 * 1024 * 1024
 
 
 class AIServerError(Exception):
-    """Chức năng: biểu diễn lỗi gọi AI server. Đầu vào: message/code/status. Đầu ra: exception chuẩn."""
+    """Chức năng: biểu diễn lỗi gọi AI server. Đầu vào: message/code/status. Đầu ra: exception chuẩn.
 
-    def __init__(self, message, code="ai_server_error", status_code=status.HTTP_502_BAD_GATEWAY, detail=""):
+    `code` là phân loại lỗi ở tầng backend (timeout, bad_gateway, unavailable...),
+    còn `ai_error_code` (nếu có) là error_code nghiệp vụ cụ thể do AI server trả về
+    (vd. no_food_detected, no_ingredients_identified, no_segments_produced...) —
+    giữ riêng để mobile/FE có thể hiển thị thông báo cụ thể theo loại lỗi AI,
+    thay vì chỉ biết "gateway lỗi" chung.
+    """
+
+    def __init__(
+        self,
+        message,
+        code="ai_server_error",
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="",
+        ai_error_code="",
+    ):
         self.public_message = message
         self.code = code
         self.status_code = status_code
         self.detail = detail
+        self.ai_error_code = ai_error_code
         super().__init__(message)
 
 
@@ -85,22 +100,27 @@ def call_ai_analysis_server(job):
         ) from exc
     except requests.HTTPError as exc:
         response = exc.response
-        detail = ""
         upstream = response.status_code if response is not None else None
+        ai_message, ai_error_code, ai_step = "", "", ""
         if response is not None:
-            detail = _format_ai_error_detail(response)
+            ai_message, ai_error_code, ai_step = _format_ai_error_detail(response)
+        ai_error_code = _normalize_ai_error_code(ai_error_code, ai_step)
+        public_message = ai_message or f"AI server returned HTTP {upstream or 'error'}."
+        detail = f"error_code={ai_error_code}; step={ai_step}" if (ai_error_code or ai_step) else ""
         # 4xx from the AI server is a permanent problem with this request
-        # (bad image/metadata); retrying just wastes AI compute. 5xx / no
-        # response is transient and worth a bounded retry.
+        # (bad image/metadata, hoặc lỗi nghiệp vụ như no_food_detected/
+        # no_ingredients_identified/no_segments_produced); retrying chỉ tốn AI
+        # compute. 5xx / không có response là transient và đáng để retry.
         error_cls = (
             PermanentAIError if upstream is not None and 400 <= upstream < 500
             else TransientAIError
         )
         raise error_cls(
-            f"AI server returned HTTP {upstream or 'error'}.",
+            public_message,
             code="bad_gateway",
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=detail,
+            ai_error_code=ai_error_code,
         ) from exc
     except requests.RequestException as exc:
         raise TransientAIError(
@@ -167,28 +187,42 @@ def _open_job_image(job, stack):
 
 
 def _format_ai_error_detail(response):
-    """Chức năng: rút gọn lỗi JSON từ AI server. Đầu vào: requests.Response. Đầu ra: message dễ đọc."""
+    """Chức năng: rút gọn lỗi JSON từ AI server. Đầu vào: requests.Response.
+    Đầu ra: (message, ai_error_code, step). AI server (FastAPI) trả lỗi dạng
+    {"detail": {"error_code": ..., "message": ..., "context": {"step": ...}}} -
+    error_code là mã lỗi nghiệp vụ cụ thể (vd. no_food_detected,
+    no_ingredients_identified, no_segments_produced...) để mobile/FE hiển thị
+    thông báo riêng cho từng loại lỗi thay vì chỉ một message chung."""
     try:
         payload = response.json()
     except ValueError:
-        return response.text[:1000]
+        return response.text[:1000], "", ""
 
     detail = payload.get("detail")
     if isinstance(detail, dict):
         message = detail.get("message") or payload.get("message") or response.text
-        nested_detail = detail.get("detail")
-        step = nested_detail.get("step") if isinstance(nested_detail, dict) else None
-        code = detail.get("code")
-        parts = [str(message)]
-        if code:
-            parts.append(f"code={code}")
-        if step:
-            parts.append(f"step={step}")
-        return "; ".join(parts)[:1000]
+        ai_error_code = detail.get("error_code") or ""
+        context = detail.get("context")
+        step = context.get("step") if isinstance(context, dict) else None
+        return str(message)[:1000], ai_error_code, step or ""
 
     if detail:
-        return str(detail)[:1000]
-    return response.text[:1000]
+        return str(detail)[:1000], "", ""
+    return response.text[:1000], "", ""
+
+
+def _normalize_ai_error_code(ai_error_code, step):
+    """Chức năng: gộp các lỗi depth (estimate/client) thành 1 mã rõ nghĩa cho FE/mobile.
+    Đầu vào: error_code thô + step từ AI server. Đầu ra: error_code đã chuẩn hóa.
+
+    AI server dùng error_code chung ("inference_error"/"validation_error") cho mọi
+    bước inference, chỉ phân biệt bước cụ thể qua context.step ("depth"/"depth_client").
+    Mobile/FE cần 1 mã duy nhất để map sang thông báo "ước tính độ sâu thất bại" mà
+    không phải tự suy luận từ step ở từng client.
+    """
+    if ai_error_code in ("inference_error", "validation_error") and (step or "").startswith("depth"):
+        return "depth_estimation_failed"
+    return ai_error_code
 
 
 def find_best_ingredient_match(target_name, ingredients, similarity_cutoff=0.6):

@@ -9,10 +9,19 @@ from .models import InferenceJob, InferenceResult
 from .services import TransientAIError, call_ai_analysis_server, normalize_ai_result
 
 
+# Single source of truth for the retry budget, shared between the decorator
+# (which actually drives Celery's autoretry) and the in-task check below
+# (which needs to know, before Celery decides, whether *this* failure will
+# still be retried — so it can avoid marking the job "failed" prematurely).
+MAX_RETRIES = 2
+
 # A job stuck in "running" longer than this is treated as abandoned (worker
 # crashed) and may be reclaimed. Must exceed the worst-case AI latency
-# (AI_SERVER_TIMEOUT × retries + backoff).
-STALE_RUNNING_AFTER = timedelta(minutes=5)
+# (AI_SERVER_TIMEOUT × retries + backoff) — with AI_SERVER_TIMEOUT=60s and
+# max_retries=2, that's up to 3×60s of request time plus 2 backoffs of a
+# few seconds each ≈ 3 minutes, so this needs real headroom above that, not
+# just equal to it.
+STALE_RUNNING_AFTER = timedelta(minutes=10)
 
 
 @shared_task(
@@ -24,7 +33,7 @@ STALE_RUNNING_AFTER = timedelta(minutes=5)
     retry_backoff=True,
     retry_backoff_max=60,
     retry_jitter=True,
-    retry_kwargs={"max_retries": 2},
+    retry_kwargs={"max_retries": MAX_RETRIES},
 )
 def process_inference_job_task(self, job_id):
     """Chức năng: xử lý job AI bất đồng bộ, idempotent. Đầu vào: job_id. Đầu ra: job_id sau khi lưu kết quả."""
@@ -48,6 +57,12 @@ def process_inference_job_task(self, job_id):
         ):
             # Actively processed by another worker; skip to avoid a duplicate
             # AI request. Stale "running" jobs fall through and are reclaimed.
+            #
+            # Deliberately does NOT also match "retrying": that status means
+            # the previous attempt has already finished (transiently failed)
+            # and nothing is in-flight right now — this task's own Celery
+            # autoretry scheduled this exact re-run, so it's safe (and
+            # required) to fall through and actually call the AI server again.
             return job.id
         job.status = "running"
         job.error_message = ""
@@ -71,6 +86,15 @@ def process_inference_job_task(self, job_id):
                 job.error_message = f"{job.error_message} Detail: {exc.detail}"
             job.save(update_fields=["status", "error_message", "updated_at"])
             return job.id  # permanent for this job; not retried
+        except Exception as exc:
+            # Anything other than CloudinaryUploadError (e.g. the image file
+            # isn't visible on this worker's filesystem) must still mark the
+            # job failed — otherwise it's stuck at "running" forever with no
+            # error recorded, and the AI server is never called.
+            job.status = "failed"
+            job.error_message = f"Could not read or upload job image: {exc}"
+            job.save(update_fields=["status", "error_message", "updated_at"])
+            return job.id
 
     try:
         payload = call_ai_analysis_server(job)
@@ -93,12 +117,26 @@ def process_inference_job_task(self, job_id):
             job.model_version = normalized["model_version"]
         job.save(update_fields=["status", "raw_output", "latency_ms", "model_version", "updated_at"])
     except Exception as exc:
-        job.status = "failed"
+        # A TransientAIError with retry budget left is about to be retried by
+        # Celery's autoretry (raised below) — keep the job at "retrying"
+        # rather than "failed" so a polling client doesn't mistake this for
+        # the final outcome. Anything else (PermanentAIError, or a
+        # TransientAIError on the last allowed attempt, or an unrelated bug)
+        # really is final: no more retries are coming.
+        will_retry = (
+            isinstance(exc, TransientAIError) and self.request.retries < MAX_RETRIES
+        )
+        job.status = "retrying" if will_retry else "failed"
         job.error_message = getattr(exc, "public_message", str(exc))
         error_detail = getattr(exc, "detail", "")
         if error_detail:
             job.error_message = f"{job.error_message} Detail: {error_detail}"
-        job.save(update_fields=["status", "error_message", "updated_at"])
+        # ai_error_code (vd. no_food_detected, depth_estimation_failed...) cho phép
+        # mobile/FE hiển thị thông báo cụ thể theo loại lỗi thay vì chỉ error_message
+        # dạng text tự do. Lỗi không đến từ AI server (vd. lỗi code ở task này) sẽ
+        # không có ai_error_code -> lưu rỗng, mobile dùng error_message/fallback chung.
+        job.error_code = getattr(exc, "ai_error_code", "") or ""
+        job.save(update_fields=["status", "error_message", "error_code", "updated_at"])
         raise
 
     return job.id

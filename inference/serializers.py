@@ -206,6 +206,7 @@ class InferenceJobSerializer(serializers.ModelSerializer):
             "model_version",
             "latency_ms",
             "error_message",
+            "error_code",
             "raw_output",
             "result",
             "created_at",

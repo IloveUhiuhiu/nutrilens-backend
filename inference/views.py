@@ -150,6 +150,7 @@ def job_result(request, id):
         return api_response(
             "Inference job failed.",
             status_code=status.HTTP_502_BAD_GATEWAY,
+            data={"error_code": job.error_code} if job.error_code else None,
             errors={"inference": [job.error_message or "Inference job failed."]},
         )
     result = InferenceResult.objects.filter(job=job).first()
