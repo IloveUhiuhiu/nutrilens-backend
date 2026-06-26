@@ -13,20 +13,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy to EC2
+      - name: Deploy to GCP VM
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          host: ${{ secrets.GCP_BACKEND_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           script: |
             set -e
             APP_DIR="$HOME/nutrilens-backend"
             REPO_URL="https://github.com/IloveUhiuhiu/nutrilens-backend.git"
 
-            # 1. Nếu thư mục dự án hoàn toàn chưa có Git
             if [ ! -d "$APP_DIR/.git" ]; then
-              echo "Thư mục đã có hoặc chưa có, tiến hành init Git tại chỗ..."
               mkdir -p "$APP_DIR"
               cd "$APP_DIR"
               git init
@@ -35,24 +33,19 @@ jobs:
               cd "$APP_DIR"
             fi
 
-            # 2. Đồng bộ và kéo code mới nhất từ nhánh main về
             git fetch origin main
             git checkout -B main origin/main
             git reset --hard origin/main
 
-            # 3. Kiểm tra nghiêm ngặt sự tồn tại của file .env bạn tự tạo
             if [ ! -f .env ]; then
-              echo "🚨 LỖI: Không tìm thấy file .env tại $APP_DIR/.env!"
+              echo "🚨 LỖI: Không tìm thấy file .env!"
               exit 1
             fi
 
-            # 4. Khởi chạy Docker Compose (Nạp file .env có sẵn)
             docker compose down
             docker compose up --build -d
 
-            # 5. Thực hiện các lệnh quản trị Django nội bộ
             docker compose exec -T web python manage.py migrate --noinput
             docker compose exec -T web python manage.py collectstatic --noinput
-            
-            # Dọn dẹp các Docker image rác cũ để tiết kiệm ổ cứng 30GB
+
             docker image prune -f
