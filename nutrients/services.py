@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.utils import timezone
 
@@ -12,6 +14,8 @@ from .query_translation import (
     translate_packaged_food_name_to_vietnamese,
     translate_usda_results_to_vietnamese,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _to_float(value, default=0):
@@ -58,6 +62,7 @@ def save_packaged_food_from_open_food_facts(barcode, payload):
     try:
         translated_name, _ = translate_packaged_food_name_to_vietnamese(raw_name)
     except QueryTranslationError:
+        logger.warning("Packaged food name translation failed for barcode=%s", barcode, exc_info=True)
         translated_name = raw_name
 
     packaged_food, _ = PackagedFood.objects.update_or_create(
@@ -97,6 +102,9 @@ def ensure_vietnamese_packaged_food_name(packaged_food):
     try:
         translated_name, _ = translate_packaged_food_name_to_vietnamese(packaged_food.name)
     except QueryTranslationError:
+        logger.warning(
+            "Packaged food name translation failed for barcode=%s", packaged_food.barcode, exc_info=True
+        )
         return packaged_food
     if translated_name and translated_name != packaged_food.name:
         packaged_food.name = translated_name
@@ -166,6 +174,7 @@ def save_food_from_usda_payload(food_payload):
     try:
         vi_name, _ = translate_food_description_to_vietnamese(description)
     except QueryTranslationError:
+        logger.warning("Food description translation failed for fdc_id=%s", fdc_id, exc_info=True)
         vi_name = description
 
     food, _ = Food.objects.update_or_create(
@@ -188,6 +197,7 @@ def search_usda_top_foods(query, limit=5):
     try:
         translated_query, translation_source = translate_food_query_to_english(query)
     except QueryTranslationError:
+        logger.warning("Food query translation failed for query=%r", query, exc_info=True)
         translated_query = query
         translation_source = "original_translation_failed"
 
@@ -210,6 +220,7 @@ def search_usda_top_foods(query, limit=5):
     try:
         results, result_translation_source = translate_usda_results_to_vietnamese(results)
     except QueryTranslationError:
+        logger.warning("USDA result translation failed for query=%r", translated_query, exc_info=True)
         results = attach_original_vietnamese_fields(results)
         result_translation_source = "original_translation_failed"
 
@@ -233,6 +244,7 @@ def ensure_vietnamese_food_name(food):
     try:
         translated_name, _ = translate_food_description_to_vietnamese(food.en_name or food.vi_name)
     except QueryTranslationError:
+        logger.warning("Food name translation failed for fdc_id=%s", food.fdc_id, exc_info=True)
         return food
     if translated_name and translated_name != food.vi_name:
         food.vi_name = translated_name
