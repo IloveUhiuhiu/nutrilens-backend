@@ -17,4 +17,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
+CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "--worker-class", "gthread", "--threads", "2", "--max-requests", "1000", "--max-requests-jitter", "100"]
